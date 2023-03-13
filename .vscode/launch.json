@@ -1,0 +1,55 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Temporal",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+      //"--do-train", 
+      "--hypertune",
+      "--epochs", "1000",
+      "--batch-size", "16",
+      "--backs", "10"
+    ]
+    },
+    {
+      "name": "Language",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${fileDirname}",
+      "args": [
+        "--output_dir=./saved_models",
+        "--model_type=roberta",
+        "--tokenizer_name=microsoft/codebert-base",
+        "--model_name_or_path=microsoft/codebert-base",
+        "--do_train",
+        "--do_eval",
+        "--epoch",
+        "50",
+        "--block_size",
+        "300",
+        "--train_batch_size",
+        "8",
+        "--evaluate_during_training",
+        //  "--eval_batch_size","64",
+        // "--embedding-type", "sum",
+        "--embedding-type",
+        "concat",
+        // "--generate_data",
+        // "--recreate-cache",
+        "--language",
+        "java"
+      ]
+    }
+  ]
+}
