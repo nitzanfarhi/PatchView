@@ -85,8 +85,6 @@ class LSTMClassification(nn.Module):
         return torch.tanh(logits)
     
 
-
-
 class Conv1D(nn.Module):
     def __init__(self, xshape1, xshape2):
         super(Conv1D, self).__init__()
@@ -100,7 +98,7 @@ class Conv1D(nn.Module):
 
         self.pool = nn.MaxPool1d(kernel_size=2)
         self.dropout = nn.Dropout(p=0.5)
-        self.fc1 = nn.Linear(conv1d_shape * ((self.xshape2 // 2) -1 ), 1024)
+        self.fc1 = nn.Linear(conv1d_shape * ((self.xshape2 // 2) ), 1024)
         self.fc2 = nn.Linear(1024, 256)
         self.fc3 = nn.Linear(256, 64)
         self.fc4 = nn.Linear(64, 1)
@@ -138,7 +136,7 @@ class Conv1DTune(nn.Module):
 
         self.pool = nn.MaxPool1d(kernel_size=2)
         self.dropout = nn.Dropout(p=dropout)
-        self.fc1 = nn.Linear(l2 * ((self.xshape2 // 2) -1 ), l1)
+        self.fc1 = nn.Linear(l2 * ((self.xshape2 // 2) ), l1)
         self.fc2 = nn.Linear(l1, l3)
         self.fc3 = nn.Linear(l3, l4)
         self.fc4 = nn.Linear(l4, 1)
