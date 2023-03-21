@@ -369,9 +369,9 @@ def concat_ignore_index(df1, df2):
 
 def add_metadata(data_path,
                  all_metadata,
-                 cur_repo):
+                 cur_repo,
+                 file):
 
-    file = cur_repo.iloc[0]["name"]
     cur_metadata = all_metadata[file.replace("_", "/", 1).lower()]
     bool_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=bool_metadata)
     cur_repo = concat_ignore_index(cur_repo, bool_df)
@@ -415,7 +415,6 @@ def handle_nonbool_metadata(cur_repo, cur_metadata):
 
 def handle_timezones(data_path, cur_repo, file):
     timezone_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[f"timezone_{x}" for x in range(-12, 15)])
-    file = cur_repo.iloc[0]["name"]
     with open(os.path.join(data_path, "timezones", file + ".json"), 'r') as f:
         timezone = int(float(f.read()))
     cur_repo = concat_ignore_index(cur_repo, timezone_df)

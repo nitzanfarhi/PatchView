@@ -20,6 +20,7 @@ using a masked language modeling (MLM) loss.
 """
 
 from __future__ import absolute_import, division, print_function
+import pickle
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
 from pydriller import Repository
 from transformers import (AdamW, get_linear_schedule_with_warmup,
@@ -210,29 +211,46 @@ def embed_file(file, tokenizer, args):
 
     return operation_list
 
-def handle_commit(commit, tokenizer, args, language='java', embedding_type='concat'):
+def handle_commit(commit, tokenizer, args, language='java', add_sep_between_lines=True, embedding_type='concat'):
     res = []
     for file in commit.modified_files:
         if "." not in file.filename:
             continue
         filetype = file.filename.split(".")[-1].lower()
-        if filetype != language.lower():
+        if language != "" and filetype != language.lower():
             continue
         if embedding_type == 'concat':
-            for a in file.diff_parsed['added']:
-                res.append(embed_txt_and_pad(a[1], tokenizer, args))
 
-            res.append(tokenizer.sep_token_id)
+            source_tokens = [tokenizer.cls_token]
 
-            for a in file.diff_parsed['deleted']:
-                res.append(embed_txt_and_pad(a[1], tokenizer, args))
+            for line in file.diff_parsed['added']:
+                source_tokens += tokenizer.tokenize(line[1])
+                if add_sep_between_lines:
+                    source_tokens += [tokenizer.sep_token]
+            
+            if not add_sep_between_lines:
+                source_tokens += [tokenizer.sep_token]
+
+            for line in file.diff_parsed['deleted']:
+                source_tokens += tokenizer.tokenize(line[1])
+                if add_sep_between_lines:
+                    source_tokens += [tokenizer.sep_token]
+
+           
+            if len(source_tokens) > args.block_size:
+                source_tokens = source_tokens[:args.block_size]
+            else:
+                padding_length = args.block_size - len(source_tokens)
+                source_tokens += [tokenizer.pad_token_id]*padding_length
+
+            res.append(torch.tensor(tokenizer.convert_tokens_to_ids(source_tokens)))
 
         elif embedding_type == 'sum':
             embed_file_res = embed_file(file, tokenizer, args)
             if embed_file_res is not None:
                 res += embed_file_res
 
-    return [x for x in res if x is not None]
+    return res
 
 
 def filter_repos(csv_list, file_path, language):
@@ -260,51 +278,72 @@ def safe_makedir(path):
         pass
 
 
+class GenericDataset(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
+
+
 class TextDataset(Dataset):
-    def __init__(self, tokenizer, args, phase):
+    def __init__(self, tokenizer, args, phase, cache = True, csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
+        
         safe_makedir("languages_cache")
         self.csv_list_path = f"languages_cache\\{args.language}.csv"
         self.tokenizer = tokenizer
         self.args = args
+        self.cache = cache
         self.language = args.language
         self.counter = 0
         self.current_path = f"languages_cache\\{self.language}_{self.args.embedding_type}_{phase}.json"
-        if os.path.exists(self.current_path) and not args.recreate_cache:
-            self.final_list = torch.load(self.current_path)
-            return
-
-        with open(self.csv_list_path, 'r') as f:
-            self.csv_list = list(csv.reader(f))
-        self.csv_list = self.csv_list[1:]
         self.final_list = []
 
-        if phase == 'train':
-            self.csv_list = self.csv_list[:int(len(self.csv_list)*0.8)]
-        elif phase == 'val':
-            self.csv_list = self.csv_list[int(len(self.csv_list)*0.8):]
-        else:
-            raise RuntimeError("Unknown phase")
 
-        # if args.embedding_type == 'sum':
-            # self.tokenizer.add_special_tokens([INS_TOKEN,DEL_TOKEN,REP_BEFORE_TOKEN, REP_AFTER_TOKEN])
+        if phase == 'train':
+            with open(os.path.join(csv_list_dir,"train_details.pickle"), 'rb') as f:
+                self.csv_list = pickle.load(f)
+        elif phase == 'val':
+            with open(os.path.join(csv_list_dir,"validation_details.pickle"), 'rb') as f:
+                self.csv_list = pickle.load(f)
+        elif phase == 'test':
+            with open(os.path.join(csv_list_dir,"test_details.pickle"), 'rb') as f:
+                self.csv_list = pickle.load(f)
+        else:
+            raise ValueError(f"Unknown phase: {phase}")
+
+        if os.path.exists(self.current_path) and self.cache:
+            self.final_list = torch.load(self.current_path)
+            return
+        
         self.create_final_list()
 
         torch.save(self.final_list, self.current_path)
 
     def create_final_list(self):
-        for repo, cur_hash, label in tqdm(self.csv_list[:]):
+        counter = 0
+        for repo, _, label, cur_hash in tqdm(self.csv_list[:]):
+            cur_hash = cur_hash.values[0]
+            if cur_hash == '4f65a3e4eedaffa1efcf9ee1eb08f0b504fbc31a':
+                print("Break")
+            if cur_hash == '':
+                counter+=1
+                continue
             commit = get_commit_from_repo(
                 os.path.join(COMMITS_PATH, repo), cur_hash)
 
-            token_arr_lst = handle_commit(
-                commit,
-                self.tokenizer,
-                self.args,
-                language=self.language,
-                embedding_type=self.args.embedding_type)
+            try:
+                token_arr_lst = handle_commit(
+                    commit,
+                    self.tokenizer,
+                    self.args,
+                    language="",
+                    embedding_type=self.args.embedding_type)
 
-            self.final_list.extend([(source_ids, int(label))
-                               for source_ids in token_arr_lst])
+                for token_arr in token_arr_lst:
+                    if token_arr is not None:
+                        self.final_list.append((token_arr, int(label)))
+            except Exception as e:
+                print(e)
+                continue
+
 
     def __len__(self):
         return len(self.final_list)
@@ -412,31 +451,31 @@ def train(args, train_dataset, model, tokenizer):
                 logging_loss = tr_loss
                 tr_nb = global_step
 
-            if args.save_steps > 0 and global_step % args.save_steps == 0:
-                path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
-                torch.save({
-                            'epoch': idx,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'loss': train_loss,
-                            }, path)
-                writer.add_scalar("Loss/train", train_loss, idx)
-                if args.evaluate_during_training:
-                    results = evaluate(
-                        args, model, tokenizer, eval_when_training=True)
-                    # for key, value in results.items():
-                    #     logger.warn("  %s = %s", key, round(value, 4))
-                    # Save model checkpoint
-                    writer.add_scalar("Loss/eval", results['eval_loss'], idx)
-                    writer.add_scalar("Acc/eval", results['eval_acc'], idx)
+        if args.save_steps > 0 and global_step % args.save_steps == 0:
+            path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
+            torch.save({
+                        'epoch': idx,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'loss': train_loss,
+                        }, path)
+            writer.add_scalar("Loss/train", train_loss, idx)
+            if args.evaluate_during_training:
+                results = evaluate(
+                    args, model, tokenizer, eval_when_training=True)
+                for key, value in results.items():
+                    logger.warn("  %s = %s", key, round(value, 4))
+                # Save model checkpoint
+                writer.add_scalar("Loss/eval", results['eval_loss'], idx)
+                writer.add_scalar("Acc/eval", results['eval_acc'], idx)
 
-                    bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
+                bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
 
-                if results['eval_acc'] > best_acc:
-                    best_acc = results['eval_acc']
-                    imporoved_accuracy(args, model, results)
-                
-                writer.flush()
+            if results['eval_acc'] > best_acc:
+                best_acc = results['eval_acc']
+                imporoved_accuracy(args, model, results)
+            
+            writer.flush()
 
     writer.close()
 

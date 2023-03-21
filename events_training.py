@@ -26,7 +26,7 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune import Tuner
 
 
-SEED = 42
+SEED = 1337
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -36,17 +36,24 @@ valid_losses = []
 
 def accuracy(model, device, dataloader):
     model.eval()
-    total_correct = 0
-    total_instances = 0
+    max_acc = 0
+    final_threshold = 0
+    for i in range(1,100):
+        total_correct = 0
+        total_instances = 0
 
-    with torch.no_grad():
-        for images, labels in dataloader:
-            images, labels = images.to(device), labels.to(device)
-            classifications = 1*(model(images).squeeze(1) > 0.5)
-            correct_predictions = sum(classifications == labels).item()
-            total_correct += correct_predictions
-            total_instances += len(images)
-    return total_correct / total_instances
+        with torch.no_grad():
+            for images, labels in dataloader:
+                images, labels = images.to(device), labels.to(device)
+                classifications = 1*(model(images).squeeze(1) > i*0.01)
+                correct_predictions = sum(classifications == labels).item()
+                total_correct += correct_predictions
+                total_instances += len(images)
+        if total_correct / total_instances > max_acc:
+            max_acc = total_correct / total_instances
+            final_threshold = i*0.01
+    # print(f"Max accuracy: {max_acc} with threshold: {final_threshold}")
+    return max_acc
 
 
 def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validation_dataset=None):
@@ -114,8 +121,9 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
         history['val_loss'].append(avg_valid_loss)
         history['acc'].append(accuracy(model, args.device, train_loader))
         history['val_acc'].append(accuracy(model, args.device, valid_loader))
-        print(
-            f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
+        if not args.hypertune:
+            print(
+                f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
 
         # writer.add_scalars('Loss', {
         #                    "train": history['loss'][-1],
@@ -199,8 +207,8 @@ def main():
     model = model.to(args.device)
 
     if args.do_train:
-        config = {"l1": 1024, "l2": 256, "l3": 256,
-                  "l4": 64, "lr": 0.0001, "dropout": 0.1, "batch_size": 32,
+        config = {"l1": 256, "l2": 128, "l3": 64,
+                  "l4": 32, "lr": 0.1, "dropout": 0.8, "batch_size": 128,
                   "optimizer": optim.SGD}
         train(config, xshape1=xshape1, xshape2=xshape2, args=args,
               train_dataset=train_dataset, validation_dataset=validation_datatest)

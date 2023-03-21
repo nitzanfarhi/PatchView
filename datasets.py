@@ -1,3 +1,4 @@
+import pickle
 import torch
 
 from torch.utils.data import Dataset, DataLoader
@@ -10,6 +11,7 @@ import os
 
 from events_create_dataset import gh_cve_dir, repo_metadata_filename
 
+csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"
 
 
 class EventsDataset(Dataset):
@@ -24,16 +26,17 @@ class EventsDataset(Dataset):
 
     def create_list_of_hashes(self, hash_list, input_path):
         all_metadata = json.load(open(os.path.join(input_path,repo_metadata_filename), 'r'))
-        for repo in tqdm(hash_list):
+        for repo in tqdm(list(hash_list)[::-1]):
             repo_name = repo.replace("/", "_")
             try:
                 cur_repo = pd.read_parquet(f"{input_path}\{gh_cve_dir}\{repo_name}.parquet")
             except FileNotFoundError:
+                print(f"File not found: {repo_name}")
                 continue
             # cur_repo = add_metadata(input_path, all_metadata, cur_repo)
             # cur_repo = fix_repo_shape(cur_repo)
             cur_repo = fix_repo_idx(cur_repo)
-
+            cur_repo = fix_repo_shape(cur_repo) 
             
             for hash, label in hash_list[repo]:
                 try: 
@@ -44,8 +47,7 @@ class EventsDataset(Dataset):
                     wanted_row = wanted_row[0]
                     self.info.append((repo_name,wanted_row))
                     event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
-                    event_window = add_metadata(input_path, all_metadata, event_window)
-                    event_window = fix_repo_shape(event_window)
+                    event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
                     event_window = event_window.drop(["Hash","Vuln"], axis = 1)
                     event_window = event_window.fillna(0)
                     self.x_set.append(event_window.values)
@@ -73,7 +75,7 @@ class CommitMessages(Dataset):
     pass
 
 
-def create_datasets(DatasetClass, **kwargs):
+def create_datasets(DatasetClass, cache=True, **kwargs):
     with open("orchestrator_training.json", "r") as f:
         orchestrator_train = json.load(f)
 
@@ -83,8 +85,25 @@ def create_datasets(DatasetClass, **kwargs):
     with open("orchestrator_testing.json", "r") as f:
         orchestrator_test = json.load(f)
 
-    train_dataset = DatasetClass(orchestrator_train, **kwargs)
-    validation_dateset = DatasetClass(orchestrator_validation, **kwargs)
-    test_dataset = DatasetClass(orchestrator_test, **kwargs)
+    # save the dataset to file for caching
+    if cache and os.path.exists("train_dataset.pkl"):
+        train_dataset = pickle.load(open("train_dataset.pkl", "rb"))
+    else:
+        train_dataset = DatasetClass(orchestrator_train, **kwargs)
+        pickle.dump( train_dataset, open("train_dataset.pkl", "wb"))
+
+        
+    if cache and os.path.exists("validation_dataset.pkl"):
+        validation_dateset = pickle.load(open("validation_dataset.pkl", "rb"))
+    else:
+        validation_dateset = DatasetClass(orchestrator_validation, **kwargs)
+        pickle.dump(validation_dateset, open("validation_dataset.pkl", "wb"))
+
+    if cache and os.path.exists("test_dataset.pkl"):
+        test_dataset = pickle.load(open("test_dataset.pkl", "rb"))
+    else:
+        test_dataset = DatasetClass(orchestrator_test, **kwargs)
+        pickle.dump(test_dataset, open("test_dataset.pkl", "wb"))
+
 
     return train_dataset, validation_dateset, test_dataset

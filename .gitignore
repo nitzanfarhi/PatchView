@@ -2,3 +2,9 @@ languages_cache/*
 orchestrator_*.json
 *.pyc
 .vscode/*
+*.pkl
+results.csv
+log/*
+.vscode/*
+saved_models/*
+*.log
