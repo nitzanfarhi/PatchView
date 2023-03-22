@@ -29,6 +29,7 @@ from transformers import (AdamW, get_linear_schedule_with_warmup,
                           OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
+from datasets import GeneralDataset
 from model import Model
 import multiprocessing
 from tqdm import tqdm
@@ -278,12 +279,7 @@ def safe_makedir(path):
         pass
 
 
-class GenericDataset(Dataset):
-    def __init__(self) -> None:
-        super().__init__()
-
-
-class TextDataset(Dataset):
+class TextDataset(GeneralDataset):
     def __init__(self, tokenizer, args, phase, cache = True, csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
         
         safe_makedir("languages_cache")

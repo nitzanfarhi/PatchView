@@ -13,8 +13,11 @@ from events_create_dataset import gh_cve_dir, repo_metadata_filename
 
 csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"
 
+class GeneralDataset(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
 
-class EventsDataset(Dataset):
+class EventsDataset(GeneralDataset):
     def __init__(self, hash_list, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
         self.hash_list = hash_list
         self.backs = backs
@@ -25,41 +28,42 @@ class EventsDataset(Dataset):
         self.create_list_of_hashes(hash_list, input_path)
 
     def create_list_of_hashes(self, hash_list, input_path):
+        repo_dict = {}
         all_metadata = json.load(open(os.path.join(input_path,repo_metadata_filename), 'r'))
-        for repo in tqdm(list(hash_list)[::-1]):
-            repo_name = repo.replace("/", "_")
-            try:
-                cur_repo = pd.read_parquet(f"{input_path}\{gh_cve_dir}\{repo_name}.parquet")
-            except FileNotFoundError:
-                print(f"File not found: {repo_name}")
+        for repo,_,label, mhash in tqdm(list(hash_list)[:]):
+            mhash = mhash.iloc[0]
+            if mhash == "":
                 continue
-            # cur_repo = add_metadata(input_path, all_metadata, cur_repo)
-            # cur_repo = fix_repo_shape(cur_repo)
-            cur_repo = fix_repo_idx(cur_repo)
-            cur_repo = fix_repo_shape(cur_repo) 
-            
-            for hash, label in hash_list[repo]:
-                try: 
-                    wanted_row = cur_repo.index[cur_repo['Hash'] == hash].tolist()
-                    if len(wanted_row) == 0:
-                        continue
-                    assert len(wanted_row) == 1, "Hash is not unique"             
-                    wanted_row = wanted_row[0]
-                    self.info.append((repo_name,wanted_row))
-                    event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
-                    event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
-                    event_window = event_window.drop(["Hash","Vuln"], axis = 1)
-                    event_window = event_window.fillna(0)
-                    self.x_set.append(event_window.values)
-                    self.y_set.append(label)
-                except Exception as e:
-                    print(e)
+            repo_name = repo.replace("/", "_")
+            if repo_name not in repo_dict:
+                try:
+                    cur_repo = pd.read_parquet(f"{input_path}\{gh_cve_dir}\{repo_name}.parquet")
+                    cur_repo = fix_repo_idx(cur_repo)
+                    cur_repo = fix_repo_shape(cur_repo) 
+                    repo_dict[repo_name] = cur_repo
+                except FileNotFoundError:
+                    print(f"File not found: {repo_name}")
                     continue
+            else:
+                cur_repo = repo_dict[repo_name]
 
+
+            wanted_row = cur_repo.index[cur_repo['Hash'] == mhash].tolist()
+            if len(wanted_row) == 0:
+                continue
+            assert len(wanted_row) == 1, "Hash is not unique"             
+            wanted_row = wanted_row[0]
+            self.info.append((repo_name,wanted_row))
+            event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
+            event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
+            event_window = event_window.drop(["Hash","Vuln"], axis = 1)
+            event_window = event_window.fillna(0)
+            self.x_set.append(event_window.values)
+            self.y_set.append(label)
 
 
     def __len__(self):
-        return len(self.hash_list)
+        return len(self.x_set)
 
     def __getitem__(self, idx):
         item = self.x_set[idx]
@@ -68,22 +72,20 @@ class EventsDataset(Dataset):
         return item, label
 
 
-class Codes(Dataset):
-    pass
 
 class CommitMessages(Dataset):
     pass
 
 
-def create_datasets(DatasetClass, cache=True, **kwargs):
-    with open("orchestrator_training.json", "r") as f:
-        orchestrator_train = json.load(f)
+def create_datasets(DatasetClass, orchestrator_location=r"C:\Users\nitzan\local\analyzeCVE", cache=True, **kwargs):
+    with open(os.path.join(orchestrator_location,"train_details.pickle"), "rb") as f:
+        orchestrator_train = pickle.load(f)
 
-    with open("orchestrator_validation.json", "r") as f:
-        orchestrator_validation = json.load(f)
+    with open(os.path.join(orchestrator_location,"validation_details.pickle"), "rb") as f:
+        orchestrator_validation = pickle.load(f)
 
-    with open("orchestrator_testing.json", "r") as f:
-        orchestrator_test = json.load(f)
+    with open(os.path.join(orchestrator_location,"test_details.pickle"), "rb") as f:
+        orchestrator_test = pickle.load(f)
 
     # save the dataset to file for caching
     if cache and os.path.exists("train_dataset.pkl"):
