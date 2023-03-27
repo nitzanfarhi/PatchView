@@ -13,9 +13,9 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-from datasets import EventsDataset, create_datasets
+from events_datasets import EventsDataset, create_datasets
 
-from dataset_utils import extract_dataset, Aggregate, pad_and_fix, split_into_x_and_y, split_repos
+from data_utils import extract_dataset, Aggregate, pad_and_fix, split_into_x_and_y, split_repos
 from events_models import Conv1D, Conv1DTune, LSTMClassification, RNNModel
 from torch.utils.tensorboard import SummaryWriter
 
@@ -65,10 +65,10 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
 
     model = Conv1DTune(
         xshape1, xshape2,  l1=config["l1"], l2=config["l2"], l3=config["l3"], l4=config["l4"])
-    # writer = SummaryWriter(
-    #     f"log/temporal/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
-    # writer.add_text("args", json.dumps(
-    #     args.__dict__, default=lambda o: '<not serializable>'))
+    writer = SummaryWriter(
+        f"log/temporal/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
+    writer.add_text("args", json.dumps(
+        args.__dict__, default=lambda o: '<not serializable>'))
 
     loss_function = nn.BCEWithLogitsLoss()
 
@@ -125,15 +125,15 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
             print(
                 f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
 
-        # writer.add_scalars('Loss', {
-        #                    "train": history['loss'][-1],
-        #                    "validation": history['val_loss'][-1]},
-        #                    epoch)
+        writer.add_scalars('Loss', {
+                           "train": history['loss'][-1],
+                           "validation": history['val_loss'][-1]},
+                           epoch)
 
-        # writer.add_scalars('Accuracy', {
-        #                    "train": history['acc'][-1],
-        #                    "validation": history['val_acc'][-1]},
-        #                    epoch)
+        writer.add_scalars('Accuracy', {
+                           "train": history['acc'][-1],
+                           "validation": history['val_acc'][-1]},
+                           epoch)
 
         # with tune.checkpoint_dir(epoch) as checkpoint_dir:
         #     path = os.path.join(checkpoint_dir, "checkpoint")
@@ -207,9 +207,12 @@ def main():
     model = model.to(args.device)
 
     if args.do_train:
-        config = {"l1": 256, "l2": 128, "l3": 64,
-                  "l4": 32, "lr": 0.1, "dropout": 0.8, "batch_size": 128,
+        config = {"l1": 64, "l2": 32, "l3": 16,
+                  "l4": 128, "lr": 0.01, "dropout": 0.2, "batch_size": 512,
                   "optimizer": optim.SGD}
+        config["optimizer"] = optim.Adam
+
+    
         train(config, xshape1=xshape1, xshape2=xshape2, args=args,
               train_dataset=train_dataset, validation_dataset=validation_datatest)
 

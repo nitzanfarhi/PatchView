@@ -29,8 +29,8 @@ from transformers import (AdamW, get_linear_schedule_with_warmup,
                           OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
-from datasets import GeneralDataset
-from model import Model
+from events_datasets import GeneralDataset
+from code_model import Model
 import multiprocessing
 from tqdm import tqdm
 import csv
@@ -309,16 +309,16 @@ class TextDataset(GeneralDataset):
             self.final_list = torch.load(self.current_path)
             return
         
-        self.create_final_list()
-
-        torch.save(self.final_list, self.current_path)
+        if cache and os.path.exists(self.current_path):
+            self.final_list = torch.load(self.current_path)
+        else:
+            self.create_final_list()
+            torch.save(self.final_list, self.current_path)
 
     def create_final_list(self):
         counter = 0
         for repo, _, label, cur_hash in tqdm(self.csv_list[:]):
             cur_hash = cur_hash.values[0]
-            if cur_hash == '4f65a3e4eedaffa1efcf9ee1eb08f0b504fbc31a':
-                print("Break")
             if cur_hash == '':
                 counter+=1
                 continue

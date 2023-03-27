@@ -8,7 +8,7 @@ import logging
 
 import pandas as pd
 import wget
-import graphql
+import data_graphql
 from misc import safe_mkdir
 
 from pathlib import Path
@@ -272,7 +272,7 @@ def graphql_preprocess(output_dir, project_name=None):
             continue
 
         try:
-            graphql.get_repo(output_dir, repo)
+            data_graphql.get_repo(output_dir, repo)
         except Exception as e:
             logger.error(f"Repository {repo} error at:" + repo +
                          traceback.format_exc())
@@ -298,11 +298,11 @@ def aggregate_all(output_dir):
 
     print("[LOG] Getting graphql data:")
     for filename in os.listdir(os.path.join(output_dir,
-                                            graphql.OUTPUT_DIRNAME))[:]:
+                                            data_graphql.OUTPUT_DIRNAME))[:]:
         logger.debug(f"Getting graphql of {filename}")
         print(filename)
         df = pd.read_csv(
-            os.path.join(output_dir, graphql.OUTPUT_DIRNAME, f"{filename}"))
+            os.path.join(output_dir, data_graphql.OUTPUT_DIRNAME, f"{filename}"))
         name = filename.split(".csv")[0]
         if df.empty:
             continue
@@ -443,7 +443,7 @@ def metadata_preprocess(output_dir):
     for repo_name in repo_commits.keys():
         logger.debug(f"Processing {repo_name}")
         author, repo = repo_name.split("/")
-        repo_metadata = graphql.get_commit_metadata(author, repo)
+        repo_metadata = data_graphql.get_commit_metadata(author, repo)
         if not repo_metadata:
             continue
         all_langs = all_langs.union(set(repo_metadata['languages_edges']))

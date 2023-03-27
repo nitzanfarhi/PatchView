@@ -2,20 +2,16 @@ import pickle
 import torch
 
 from torch.utils.data import Dataset, DataLoader
-from dataset_utils import extract_window, fix_repo_idx, fix_repo_shape, get_event_window
-from misc import Set, add_metadata
+from data_utils import extract_window, fix_repo_idx, fix_repo_shape, get_event_window
+from misc import Set, add_metadata, GeneralDataset
 from tqdm import tqdm
 import json
 import pandas as pd
 import os
 
-from events_create_dataset import gh_cve_dir, repo_metadata_filename
+from data_creation import gh_cve_dir, repo_metadata_filename
 
 csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"
-
-class GeneralDataset(Dataset):
-    def __init__(self) -> None:
-        super().__init__()
 
 class EventsDataset(GeneralDataset):
     def __init__(self, hash_list, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
@@ -73,39 +69,16 @@ class EventsDataset(GeneralDataset):
 
 
 
-class CommitMessages(Dataset):
-    pass
-
-
 def create_datasets(DatasetClass, orchestrator_location=r"C:\Users\nitzan\local\analyzeCVE", cache=True, **kwargs):
-    with open(os.path.join(orchestrator_location,"train_details.pickle"), "rb") as f:
-        orchestrator_train = pickle.load(f)
-
-    with open(os.path.join(orchestrator_location,"validation_details.pickle"), "rb") as f:
-        orchestrator_validation = pickle.load(f)
-
-    with open(os.path.join(orchestrator_location,"test_details.pickle"), "rb") as f:
-        orchestrator_test = pickle.load(f)
-
-    # save the dataset to file for caching
-    if cache and os.path.exists("train_dataset.pkl"):
-        train_dataset = pickle.load(open("train_dataset.pkl", "rb"))
-    else:
-        train_dataset = DatasetClass(orchestrator_train, **kwargs)
-        pickle.dump( train_dataset, open("train_dataset.pkl", "wb"))
-
+    res = []
+    for set_name in ["train", "validation", "test"]:
+        with open(os.path.join(orchestrator_location,f"{set_name}_details.pickle"), "rb") as f:
+            cur_set = pickle.load(f)
+        if cache and os.path.exists(f"{set_name}_dataset.pkl"):
+            cur_set = pickle.load(open(f"{set_name}_dataset.pkl", "rb"))
+        else:
+            cur_set = DatasetClass(cur_set, **kwargs)
+            pickle.dump(cur_set, open(f"{set_name}_dataset.pkl", "wb"))
+        res.append(cur_set)
+    return res
         
-    if cache and os.path.exists("validation_dataset.pkl"):
-        validation_dateset = pickle.load(open("validation_dataset.pkl", "rb"))
-    else:
-        validation_dateset = DatasetClass(orchestrator_validation, **kwargs)
-        pickle.dump(validation_dateset, open("validation_dataset.pkl", "wb"))
-
-    if cache and os.path.exists("test_dataset.pkl"):
-        test_dataset = pickle.load(open("test_dataset.pkl", "rb"))
-    else:
-        test_dataset = DatasetClass(orchestrator_test, **kwargs)
-        pickle.dump(test_dataset, open("test_dataset.pkl", "wb"))
-
-
-    return train_dataset, validation_dateset, test_dataset
