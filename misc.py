@@ -18,6 +18,8 @@ from collections import Counter
 import numpy as np
 from enum import Enum
 
+from torch.utils.data import Dataset
+
 
 all_langs = [
     '1C Enterprise', 'AGS Script', 'AIDL', 'AMPL', 'ANTLR', 'API Blueprint',
@@ -421,4 +423,10 @@ def handle_timezones(data_path, cur_repo, file):
 
     cur_repo[f"timezone_{timezone}"] = 1
     return cur_repo
+
+
+
+class GeneralDataset(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
 
