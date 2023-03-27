@@ -8,3 +8,4 @@ log/*
 .vscode/*
 saved_models/*
 *.log
+.vscode/launch.json
