@@ -9,3 +9,4 @@ log/*
 saved_models/*
 *.log
 .vscode/launch.json
+*.log
