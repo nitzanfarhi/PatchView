@@ -12,8 +12,9 @@ from torch import nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from events_datasets import EventsDataset, create_datasets
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
 
 from data_utils import extract_dataset, Aggregate, pad_and_fix, split_into_x_and_y, split_repos
 from events_models import Conv1D, Conv1DTune, LSTMClassification, RNNModel
@@ -56,17 +57,16 @@ def accuracy(model, device, dataloader):
     return max_acc
 
 
-def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validation_dataset=None):
+def train(model, config, args=None, train_dataset=None, validation_dataset=None, name='events', calc_acc=False):
 
     train_loader = DataLoader(
         train_dataset, batch_size=config["batch_size"], shuffle=True)
-    valid_loader = DataLoader(
-        validation_dataset, batch_size=config["batch_size"], shuffle=True)
+    if validation_dataset is not None:
+        valid_loader = DataLoader(
+            validation_dataset, batch_size=config["batch_size"], shuffle=True)
 
-    model = Conv1DTune(
-        xshape1, xshape2,  l1=config["l1"], l2=config["l2"], l3=config["l3"], l4=config["l4"])
     writer = SummaryWriter(
-        f"log/temporal/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
+        f"log/{name}/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
     writer.add_text("args", json.dumps(
         args.__dict__, default=lambda o: '<not serializable>'))
 
@@ -74,22 +74,20 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
 
     optimizer = config["optimizer"](model.parameters(), lr=config["lr"])
 
-    model.cuda()
-
     history = {
         'loss': [],
         'acc': [],
         'val_loss': [],
         'val_acc': []
     }
-
-    for epoch in range(args.epochs):
+    best_val_accuracy = 0
+    for epoch in trange(args.epochs):
         losses = []
         valid_losses = []
         model.train()
 
         # (pbar := tqdm(list(trainloader)[:], leave=False)):
-        for data in train_loader:
+        for data in (pbar := tqdm(train_loader, leave=False)):
             inputs, labels = data
             inputs = inputs.cuda()
             labels = labels.cuda()
@@ -102,28 +100,35 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
             loss.backward()
             optimizer.step()
             losses.append(float(loss))
-            # pbar.set_description(f"Epoch {epoch} - loss: {np.mean(losses)}")
+            pbar.set_description(f"curloss - {loss}")
 
         avg_loss = np.mean(losses)
 
-        model.eval()
-        for data in valid_loader:
-            inputs, labels = data
-            inputs = inputs.cuda()
-            labels = labels.cuda()
-            labels = labels.unsqueeze(1)
-            tag_scores = model(inputs)
-            loss = loss_function(tag_scores.float(), labels.float())
-            valid_losses.append(float(loss))
-        avg_valid_loss = np.mean(valid_losses)
+        if validation_dataset is not None:
+            model.eval()
+            for data in valid_loader:
+                inputs, labels = data
+                inputs = inputs.cuda()
+                labels = labels.cuda()
+                labels = labels.unsqueeze(1)
+                tag_scores = model(inputs)
+                loss = loss_function(tag_scores.float(), labels.float())
+                valid_losses.append(float(loss))
+            avg_valid_loss = np.mean(valid_losses)
+        else:
+            avg_valid_loss = 0
 
         history['loss'].append(avg_loss)
         history['val_loss'].append(avg_valid_loss)
-        history['acc'].append(accuracy(model, args.device, train_loader))
-        history['val_acc'].append(accuracy(model, args.device, valid_loader))
-        if not args.hypertune:
+        if calc_acc:
+            history['acc'].append(accuracy(model, args.device, train_loader))
+            history['val_acc'].append(accuracy(model, args.device, valid_loader))
+        else:
+            history['acc'].append(0)
+            history['val_acc'].append(0)
+
             print(
-                f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
+                 f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
 
         writer.add_scalars('Loss', {
                            "train": history['loss'][-1],
@@ -134,13 +139,18 @@ def train(config, args=None, xshape1=0, xshape2=0, train_dataset=None, validatio
                            "train": history['acc'][-1],
                            "validation": history['val_acc'][-1]},
                            epoch)
+        
+        writer.add_scalar("loss/eval", history['val_loss'][-1], epoch)
+        writer.add_scalar("acc/eval", history['val_acc'][-1], epoch)
+        writer.add_scalar("loss/train", history['loss'][-1], epoch)
+        writer.add_scalar("acc/train", history['acc'][-1], epoch)
 
-        # with tune.checkpoint_dir(epoch) as checkpoint_dir:
-        #     path = os.path.join(checkpoint_dir, "checkpoint")
-        #     torch.save((model.state_dict(), optimizer.state_dict()), path)
+        if history['val_acc'][-1] > best_val_accuracy:
+            best_val_accuracy = history['val_acc'][-1]
+            checkpoint_prefix = f'checkpoint-best-acc-events.bin'
+            output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
+            torch.save(model.state_dict(), output_dir)
 
-        tune.report(loss=max(history['val_loss']),
-                    accuracy=max(history["val_acc"]))
 
     return history
 
@@ -162,11 +172,43 @@ def evaluate(args, model, valid_loader, criterion, optimizer, device):
 
         valid_loss = running_loss/len(valid_loader)
         valid_losses.append(valid_loss.detach().numpy())
-        # print(f'valid_loss {valid_loss}')
+        print(f'valid_loss {valid_loss}')
+
+    return valid_losses / len(valid_loader) 
 
 
-def load_model(args, model):
-    checkpoint_prefix = f'checkpoint-best-acc-{args.language}/model.bin'
+def test(args, model, dataset, name):
+    eval_sampler = SequentialSampler(dataset)
+    eval_dataloader = DataLoader(
+        dataset, sampler=eval_sampler, batch_size=args.batch_size)
+
+    # Eval!
+    logger.info("***** Running Test *****")
+    logger.info("  Num examples = %d", len(dataset))
+    logger.info("  Batch size = %d", args.batch_size)
+    model.eval()
+    logits = []
+    labels = []
+    for batch in tqdm(eval_dataloader, total=len(eval_dataloader), leave=False):
+        inputs = batch[0].to(args.device)
+        label = batch[1].to(args.device)
+        with torch.no_grad():
+            logit = model(inputs)
+            logits.append(logit.cpu().numpy())
+            labels.append(label.cpu().numpy())
+
+    logits = np.concatenate(logits, 0)
+    labels = np.concatenate(labels, 0)
+    preds = logits[:, 0] > 0.5
+    with open(os.path.join("saved_models", f"{name}_predictions.txt"), 'w') as f:
+        for example, pred in zip(dataset.info, preds):
+            if pred:
+                f.write(str(example)+'\t1\n')
+            else:
+                f.write(str(example)+'\t0\n')
+
+def load_model(args, model, name):
+    checkpoint_prefix = f'checkpoint-best-acc-{name}.bin'
     output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
     model.load_state_dict(torch.load(output_dir))
     model.to(args.device)
@@ -194,27 +236,38 @@ def main():
     set_seed(SEED)
 
 
-    train_dataset, validation_datatest, test_dataset = create_datasets(EventsDataset, backs=args.backs)
+    train_dataset, validation_datatest, test_dataset = create_datasets(EventsDataset, backs=args.backs, cache = args.cache)
     xshape1 = train_dataset[0][0].shape[0]
     xshape2 = train_dataset[0][0].shape[1]
 
     args.start_epoch = 0
     args.start_step = 0
 
+    config = {'l1': 64, 'l2': 32, 'l3': 16,
+                'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
+                'optimizer': optim.Adam}
+
     args.device = torch.device(
         "cuda:0" if torch.cuda.is_available() else "cpu")
-    model = Conv1D(xshape1, xshape2)
+    model = Conv1DTune(
+        xshape1, xshape2,  l1=config["l1"], l2=config["l2"], l3=config["l3"], l4=config["l4"])
     model = model.to(args.device)
 
     if args.do_train:
-        config = {"l1": 64, "l2": 32, "l3": 16,
-                  "l4": 128, "lr": 0.01, "dropout": 0.2, "batch_size": 512,
-                  "optimizer": optim.SGD}
-        config["optimizer"] = optim.Adam
+        train(model, config, args=args,
+              train_dataset=train_dataset, validation_dataset=validation_datatest, name='events')
 
-    
-        train(config, xshape1=xshape1, xshape2=xshape2, args=args,
-              train_dataset=train_dataset, validation_dataset=validation_datatest)
+    if args.do_eval:
+        load_model(args, model, 'events')
+        optimizer = config['optimizer'](model.parameters(), lr=config['lr'])
+        criterion = nn.BCEWithLogitsLoss()
+        device = args.device
+        evaluate(args, model, validation_datatest, criterion, optimizer, device)
+
+    if args.do_test:
+        load_model(args, model, 'events')
+        test(args, model, test_dataset, 'events')
+
 
     if args.hypertune:
         hypertune(train_dataset, validation_datatest, xshape1, xshape2, args)
@@ -265,7 +318,7 @@ def hypertune(train_dataset, validation_datatest, xshape1, xshape2, args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--do-train", action="store_true",
+    parser.add_argument("--do-train", action="store_false",
                         help="Whether to run training.")
     parser.add_argument("--hypertune", action="store_true",
                         help="Whether to run hyperparameter tuning.")
@@ -273,12 +326,15 @@ def parse_args():
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do-test", action="store_true",
                         help="Whether to run test on the test set.")
-    parser.add_argument("--epochs", default=10, type=int,
+    parser.add_argument("--epochs", default=100, type=int,
                         help="Total number of training epochs to perform.")
-    parser.add_argument("--batch-size", default=32, type=int,
+    parser.add_argument("--batch-size", default=16, type=int,
                         help="Total batch size for training.")
     parser.add_argument("--backs", default=10, type=int,
                         help="Number of back commits to use for training.")
+    parser.add_argument('--cache', action='store_true', help="cache old data")
+    parser.add_argument("--output_dir", default="saved_models", type=str)
+                        
 
     return parser.parse_args()
 

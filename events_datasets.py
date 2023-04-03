@@ -14,19 +14,27 @@ from data_creation import gh_cve_dir, repo_metadata_filename
 csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"
 
 class EventsDataset(GeneralDataset):
-    def __init__(self, hash_list, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
+    def __init__(self, hash_list, set_name, cache=True, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
         self.hash_list = hash_list
         self.backs = backs
         self.x_set = []
         self.y_set = []
         self.info = []
+        self.current_path = f"languages_cache\\events_{set_name}.json"
+        self.cache = cache
+        if self.cache and os.path.exists(self.current_path):
+            x_set, y_set = torch.load(self.current_path)
+            self.x_set = x_set
+            self.y_set = y_set
+        else:
+            self.create_list_of_hashes(hash_list, input_path )
+            torch.save((self.x_set, self.y_set), self.current_path)
 
-        self.create_list_of_hashes(hash_list, input_path)
 
     def create_list_of_hashes(self, hash_list, input_path):
         repo_dict = {}
         all_metadata = json.load(open(os.path.join(input_path,repo_metadata_filename), 'r'))
-        for repo,_,label, mhash in tqdm(list(hash_list)[:]):
+        for repo,_,label, mhash in tqdm(list(hash_list)[:], leave=False):
             mhash = mhash.iloc[0]
             if mhash == "":
                 continue
@@ -49,7 +57,7 @@ class EventsDataset(GeneralDataset):
                 continue
             assert len(wanted_row) == 1, "Hash is not unique"             
             wanted_row = wanted_row[0]
-            self.info.append((repo_name,wanted_row))
+            self.info.append((repo_name,mhash))
             event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
             event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
             event_window = event_window.drop(["Hash","Vuln"], axis = 1)
@@ -77,7 +85,7 @@ def create_datasets(DatasetClass, orchestrator_location=r"C:\Users\nitzan\local\
         if cache and os.path.exists(f"{set_name}_dataset.pkl"):
             cur_set = pickle.load(open(f"{set_name}_dataset.pkl", "rb"))
         else:
-            cur_set = DatasetClass(cur_set, **kwargs)
+            cur_set = DatasetClass(cur_set, set_name, cache=cache, **kwargs)
             pickle.dump(cur_set, open(f"{set_name}_dataset.pkl", "wb"))
         res.append(cur_set)
     return res

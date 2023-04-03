@@ -1,5 +1,6 @@
 import contextlib
 from functools import wraps
+import random
 from time import time
 import itertools
 import requests
@@ -13,6 +14,7 @@ import os
 import argparse
 import enum
 import json
+import torch
 from dateutil import parser
 from collections import Counter
 import numpy as np
@@ -430,3 +432,10 @@ class GeneralDataset(Dataset):
     def __init__(self) -> None:
         super().__init__()
 
+def set_seed(seed=42):
+    random.seed(seed)
+    os.environ['PYHTONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
