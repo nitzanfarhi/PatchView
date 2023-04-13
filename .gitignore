@@ -10,3 +10,5 @@ saved_models/*
 *.log
 .vscode/launch.json
 *.log
+test_trainer/*
+wandb/*

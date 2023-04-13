@@ -80,12 +80,12 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
         'val_loss': [],
         'val_acc': []
     }
+    
     best_val_accuracy = 0
     for epoch in trange(args.epochs):
         losses = []
         valid_losses = []
         model.train()
-
         # (pbar := tqdm(list(trainloader)[:], leave=False)):
         for data in (pbar := tqdm(train_loader, leave=False)):
             inputs, labels = data
@@ -101,6 +101,8 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
             optimizer.step()
             losses.append(float(loss))
             pbar.set_description(f"curloss - {loss}")
+
+
 
         avg_loss = np.mean(losses)
 
