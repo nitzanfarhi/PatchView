@@ -1,27 +1,11 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Fine-tuning the library models for language modeling on a text file (GPT, GPT-2, BERT, RoBERTa).
-GPT and GPT-2 are fine-tuned using a causal language modeling (CLM) loss while BERT and RoBERTa are fine-tuned
-using a masked language modeling (MLM) loss.
-"""
-
 from __future__ import absolute_import, division, print_function
-from collections import defaultdict
-import pickle
+
+
+
+import win32file
+win32file._setmaxstdio(2048)
+
+
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
 from pydriller import Repository
 from transformers import (AdamW, get_linear_schedule_with_warmup,
@@ -30,13 +14,12 @@ from transformers import (AdamW, get_linear_schedule_with_warmup,
                           OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
-from events_datasets import GeneralDataset
-from code_model import *
+
 import multiprocessing
-from tqdm import tqdm, trange
+from tqdm import tqdm
 import csv
 import git
-
+import pickle
 import json
 import difflib
 import argparse
@@ -46,8 +29,6 @@ import random
 import numpy as np
 import torch
 import datetime
-
-from misc import set_seed
 torch.cuda.empty_cache()
 from torch.utils.tensorboard import SummaryWriter
 
@@ -64,6 +45,42 @@ MODEL_CLASSES = {
     'distilbert': (DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
 }
 
+
+
+import torch
+import torch.nn as nn
+import torch
+from torch.autograd import Variable
+import copy
+from torch.nn import CrossEntropyLoss, MSELoss
+
+    
+    
+class Model(nn.Module):   
+    def __init__(self, encoder,config,tokenizer,args):
+        super(Model, self).__init__()
+        self.encoder = encoder
+        self.config=config
+        self.tokenizer=tokenizer
+        self.args=args
+    
+        
+    def forward(self, input_ids=None,labels=None): 
+        outputs=self.encoder(input_ids,attention_mask=input_ids.ne(1))[0]
+        logits=outputs
+        prob=torch.sigmoid(logits)
+        if labels is not None:
+            labels=labels.float()
+            loss=torch.log(prob[:,0]+1e-10)*labels+torch.log((1-prob)[:,0]+1e-10)*(1-labels)
+            loss=-loss.mean()
+            return loss,prob
+        else:
+            return prob
+      
+        
+ 
+
+
 COMMITS_PATH = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\commits"
 MAXIMAL_FILE_SIZE = 1000000
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'max_split_size_mb:128'
@@ -73,6 +90,9 @@ INS_TOKEN='[INS]'
 DEL_TOKEN='[DEL]'
 REP_BEFORE_TOKEN='[RBT]'
 REP_AFTER_TOKEN='[RAT]'
+
+ADD_TOKEN = '[ADD]'
+DELETE_TOKEN = '[DEL]'
 
 class InputFeatures(object):
     """A single training/test features for a example."""
@@ -215,13 +235,14 @@ def embed_file(file, tokenizer, args):
 
     return operation_list
 
+
+
+
 def handle_commit(commit, tokenizer, args, language='all', add_sep_between_lines=True, embedding_type='concat'):
     res = []
-    for file in commit.modified_files:
-        if "." not in file.filename:
-            continue
-        filetype = file.filename.split(".")[-1].lower()
-        if language != "all" and filetype != language.lower():
+    for file in commit["files"]:
+
+        if language != "all" and commit["filetype"] != language.lower():
             continue
         if embedding_type == 'concat':
             source_tokens = [tokenizer.cls_token]
@@ -253,6 +274,23 @@ def handle_commit(commit, tokenizer, args, language='all', add_sep_between_lines
             if embed_file_res is not None:
                 res += embed_file_res
 
+        elif embedding_type == 'simple':
+            added = [diff[1] for diff in file.diff_parsed['added']]
+            deleted = [diff[1] for diff in file.diff_parsed['deleted']]
+            file_res = " ".join(added+deleted)
+            file_res = tokenizer(file_res, truncation=True, padding='max_length', max_length=args.block_size)
+            res.append(file_res)            
+
+        elif embedding_type == 'simple_with_tokens':
+            special_tokens_dict = {'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]}
+            tokenizer.add_special_tokens(special_tokens_dict)
+            added = [ADD_TOKEN]+[diff[1] for diff in file['added']]+[tokenizer.sep_token]
+            deleted = [DEL_TOKEN]+[diff[1] for diff in file['deleted']]
+            file_res = " ".join(added+deleted)
+            file_res = tokenizer(file_res, truncation=True, padding='max_length', max_length=args.block_size)
+            res.append(file_res)
+        
+
     return res
 
 
@@ -281,19 +319,24 @@ def safe_makedir(path):
         pass
 
 
-class TextDataset(GeneralDataset):
-    def __init__(self, tokenizer, args, phase, csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
+    
+
+class TextDataset(Dataset):
+
+    def __init__(self, tokenizer, args, phase,  csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
         
         safe_makedir("languages_cache")
         self.csv_list_path = f"languages_cache\\{args.language}.csv"
+        self.git_path = f"languages_cache\\{args.language}_{phase}.git"
         self.tokenizer = tokenizer
         self.args = args
-        self.cache = args.cache
+        self.cache = not args.recreate_cache
         self.language = args.language
         self.counter = 0
         self.current_path = f"languages_cache\\{self.language}_{self.args.embedding_type}_{phase}.json"
         self.final_list = []
         self.hash_list = []
+
 
 
         if phase == 'train':
@@ -308,54 +351,125 @@ class TextDataset(GeneralDataset):
         else:
             raise ValueError(f"Unknown phase: {phase}")
 
+        commit_list = self.get_commits()
+        self.create_final_list(commit_list)
 
-        print(f"Caching: {self.cache} , Path to cache: {self.current_path}: {os.path.exists(self.current_path)}")
-        if self.cache and os.path.exists(self.current_path):
-            self.final_list = torch.load(self.current_path)[:]
+    def get_commits(self):
+        result = []
+        if os.path.exists(self.git_path) and self.cache:
+            with open(self.git_path, 'rb') as f:
+                return pickle.load(f)
         else:
-            self.create_final_list()
-            torch.save(self.final_list, self.current_path)
+            for repo, _, label, cur_hash in tqdm(self.csv_list[:]):
+                try:
+                    cur_hash = cur_hash.values[0]
+                    if cur_hash == "":
+                        continue
+                    result.append(self.prepare_dict(repo, label, cur_hash))
 
-    def create_final_list(self):
-        counter = 0
-        for repo, _, label, cur_hash in tqdm(self.csv_list[:], leave=False):
-            cur_hash = cur_hash.values[0]
-            if cur_hash == '':
-                counter+=1
+                except Exception as e:
+                    print(e)
+                    continue
+            with open(self.git_path, 'wb') as f:
+                pickle.dump(result, f)
+
+            return result
+
+    def prepare_dict(self, repo, label, cur_hash):
+
+        commit = get_commit_from_repo(
+                        os.path.join(COMMITS_PATH, repo), cur_hash)
+        final_dict = {}
+        final_dict["name"] = commit.project_name
+        final_dict["hash"] = commit.hash
+        final_dict["files"] = []
+        final_dict["source"] = []
+        final_dict["label"] = label
+        final_dict["repo"] = repo
+        final_dict["message"] = commit.message
+
+        for file in commit.modified_files:
+            cur_dict = {}
+            before = ""
+            after = ""
+            if file.content_before is not None:
+                try:
+                    before = file.content_before.decode('utf-8')
+                except UnicodeDecodeError:
+                    continue
+            else:
+                before = ""
+
+            if file.content is not None:
+                try:
+                    after = file.content.decode('utf-8')
+                except UnicodeDecodeError:
+                    continue
+            if "." not in file.filename:
                 continue
-            commit = get_commit_from_repo(
-                os.path.join(COMMITS_PATH, repo), cur_hash)
+            if len(after) > MAXIMAL_FILE_SIZE or len(before) > MAXIMAL_FILE_SIZE:
+                continue
 
+            filetype = file.filename.split(".")[-1].lower()
+            cur_dict["filetype"] = filetype
+            cur_dict["filename"] = file.filename
+            cur_dict["content"] = after
+            cur_dict["before_content"] = before
+            cur_dict["added"] = file.diff_parsed["added"]
+            cur_dict["deleted"] = file.diff_parsed["deleted"]
+            final_dict["files"].append(cur_dict)
+
+        return final_dict
+
+
+    def create_final_list(self, commit_list):
+        for commit in tqdm(commit_list):
             try:
                 token_arr_lst = handle_commit(
                     commit,
                     self.tokenizer,
                     self.args,
-                    language="",
+                    language=self.language,
                     embedding_type=self.args.embedding_type)
 
                 for token_arr in token_arr_lst:
                     if token_arr is not None:
-                        self.hash_list.append(f"{repo}/{cur_hash}")
-                        self.final_list.append((token_arr, int(label)))
+                        self.hash_list.append(f"{commit['name']}/{commit['hash']}")
+                        self.final_list.append((token_arr, int(commit['label'])))
+                
             except Exception as e:
                 print(e)
                 continue
-
+        
+        with open(self.git_path, 'wb') as f:
+            pickle.dump(commit_list, f)
 
     def __len__(self):
         return len(self.final_list)
 
     def __getitem__(self, i):
-        source_ids, label = self.final_list[i]
-        return source_ids, torch.tensor(int(label))
+        encodings, label = self.final_list[i]
+        item = {key: torch.tensor(val) for key, val in encodings.items()}
+
+        item['labels'] = torch.tensor(label)
+        return item
 
 
 
 
-def oldtrain(train_dataset, model, name, args, eval_dataset=None, tokenizer=None):
+def set_seed(seed=42):
+    random.seed(seed)
+    os.environ['PYHTONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def train(args, train_dataset, model, tokenizer, eval_dataset=None):
+    logger.warning("Configuring training")
     #  todo tensorboard handling https://discuss.pytorch.org/t/how-to-plot-train-and-validation-accuracy-graph/105524/2
-    writer = SummaryWriter(f"log/{name}/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
+    writer = SummaryWriter(f"log/{args.language}/{args.embedding_type}/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
     writer.add_text("args",json.dumps(args.__dict__, default=lambda o: '<not serializable>'))
 
     # add graph to tensorboard
@@ -405,13 +519,11 @@ def oldtrain(train_dataset, model, name, args, eval_dataset=None, tokenizer=None
 
     model.zero_grad()
 
-
-    # print("Started")
-    # history = defaultdict(list)
-    for idx in trange(args.epochs, leave=False):
+    for idx in range(args.start_epoch, int(args.num_train_epochs)):
+        bar = tqdm(train_dataloader,leave=False)
         tr_num = 0
         train_loss = 0
-        for batch in tqdm(train_dataloader, leave=False):
+        for _, batch in enumerate(bar):
             inputs = batch[0].to(args.device)
             labels = batch[1].to(args.device)
             model.train()
@@ -438,32 +550,41 @@ def oldtrain(train_dataset, model, name, args, eval_dataset=None, tokenizer=None
                 logging_loss = tr_loss
                 tr_nb = global_step
 
-        print(f"Epoch: {idx} Loss: {avg_loss}")
-        # if args.save_steps > 0 and global_step % args.save_steps == 0:
-        #     path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
-        #     torch.save({
-        #                 'epoch': idx,
-        #                 'model_state_dict': model.state_dict(),
-        #                 'optimizer_state_dict': optimizer.state_dict(),
-        #                 'loss': train_loss,
-        #                 }, path)
-        #     writer.add_scalar("Loss/train", train_loss, idx)
-        #     if args.evaluate_during_training:
-        #         results = evaluate(
-        #             args, model, tokenizer, eval_when_training=True)
-        #         for key, value in results.items():
-        #             logger.warn("  %s = %s", key, round(value, 4))
-        #         # Save model checkpoint
-        #         writer.add_scalar("Loss/eval", results['eval_loss'], idx)
-        #         writer.add_scalar("Acc/eval", results['eval_acc'], idx)
+            if args.save_steps > 0 and global_step % args.save_steps == 0:
+                path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
+                torch.save({
+                            'epoch': idx,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'loss': train_loss,
+                            }, path)
+                # writer.add_scalar("Loss/train", train_loss, idx)
+                if eval_dataset:
+                    results = evaluate(args, model, tokenizer, train_dataset)
+                    writer.add_scalar("Loss/train", results['eval_loss'], idx)
+                    writer.add_scalar("Acc/train", results['eval_acc'], idx)      
 
-        #         bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
+                    logger.warning("Train:")
+                    for key, value in results.items():
+                        logger.warning("  %s = %s", key, round(value, 4))
 
-        #     if results['eval_acc'] > best_acc:
-        #         best_acc = results['eval_acc']
-        #         imporoved_accuracy(args, model, results)
-            
-        #     writer.flush()
+                    results = evaluate(args, model, tokenizer, eval_dataset)
+                    writer.add_scalar("Loss/eval", results['eval_loss'], idx)
+                    writer.add_scalar("Acc/eval", results['eval_acc'], idx)
+
+                    logger.warning("Eval:")
+                    for key, value in results.items():
+                        logger.warning("  %s = %s", key, round(value, 4))
+                    
+                    # Save model checkpoint
+                    print(f"epoch {idx} train_loss {avg_loss},  eval_loss {results['eval_loss']}, acc {results['eval_acc']} ")
+                    bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
+
+                if results['eval_acc'] > best_acc:
+                    best_acc = results['eval_acc']
+                    imporoved_accuracy(args, model, results)
+                
+                writer.flush()
 
     writer.close()
 
@@ -482,13 +603,14 @@ def imporoved_accuracy(args, model, results):
         model, 'module') else model
     output_dir = os.path.join(output_dir, 'model.bin')
     torch.save(model_to_save.state_dict(), output_dir)
-    logger.warn(
+    logger.warning(
         "Saving model checkpoint to %s", output_dir)
 
 
-def evaluate(args, model, tokenizer, eval_when_training=False):
+def evaluate(args, model, tokenizer, eval_dataset):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
+
 
     safe_makedir(eval_output_dir)
 
@@ -506,7 +628,7 @@ def evaluate(args, model, tokenizer, eval_when_training=False):
     model.eval()
     logits = []
     labels = []
-    for batch in eval_dataloader:
+    for batch in tqdm(eval_dataloader, leave=False):
         inputs = batch[0].to(args.device)
         label = batch[1].to(args.device)
         with torch.no_grad():
@@ -530,6 +652,7 @@ def evaluate(args, model, tokenizer, eval_when_training=False):
 
 def test(args, model, tokenizer):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
+    eval_dataset = TextDataset(tokenizer, args, 'val')
 
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(eval_dataset)
@@ -579,7 +702,14 @@ def main():
     # Parse Args
     args = parse_args()
 
+    # add sha to args
+    repo = git.Repo(search_parent_directories=True)
+    sha = repo.head.object.hexsha
+    args.sha = sha
+
+
     # Setup CUDA
+    args.n_gpu = torch.cuda.device_count()
     args.device = torch.device(
         "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
 
@@ -597,7 +727,7 @@ def main():
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                           cache_dir=args.cache_dir if args.cache_dir else None)
-    config.num_labels = 1
+    config.num_labels = 2
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None)
@@ -606,38 +736,34 @@ def main():
         args.block_size = tokenizer.max_len_single_sentence
     args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
 
-    roberta = model_class(config)
+    model = model_class(config)
 
-
-    model = Model(roberta, config, tokenizer, args)
+    model = Model(model, config, tokenizer, args)
 
     logger.info("Training/evaluation parameters %s", args)
 
     if args.generate_data:
         generate_data(args.language)
 
+    eval_dataset= TextDataset(tokenizer, args, 'val')
+
     if args.do_train:
-        from events_training import train as mytrain
-        mconfig = { 'batch_size': args.batch_size, "optimizer":AdamW, "lr":0.1}
-        model.to(args.device)
-        # beep_train(model, TextDataset(tokenizer,args, 'train'), args)
-        mytrain(model,mconfig, args, TextDataset(tokenizer,args, 'train'), TextDataset(tokenizer,args, 'val'), name ='code')
-        # oldtrain(TextDataset(tokenizer, args, 'train'), model, 'code', args, tokenizer=tokenizer)
+        train(args, TextDataset(tokenizer, args, 'train'), model, tokenizer, eval_dataset = eval_dataset)
 
     if args.do_eval:
-        load_model(args, model, 'code')
-        result = evaluate(args, model, tokenizer)
+        load_model(args, model)
+        result = evaluate(args, model, tokenizer, eval_dataset)
         logger.warning("***** Eval results *****")
         for key in sorted(result.keys()):
             logger.warning("  %s = %s", key, str(round(result[key], 4)))
 
     if args.do_test:
-        load_model(args, model, 'code')
-        test(args, model, tokenizer, TextDataset(tokenizer, args, 'test'), 'code')
+        load_model(args, model)
+        test(args, model, tokenizer)
 
 
-def load_model(args, model, name):
-    checkpoint_prefix = f'checkpoint-best-acc-{name}.bin'
+def load_model(args, model):
+    checkpoint_prefix = f'checkpoint-best-acc-{args.language}/model.bin'
     output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
     model.load_state_dict(torch.load(output_dir))
     model.to(args.device)
@@ -697,23 +823,22 @@ def parse_args():
                         help="Optional input sequence length after tokenization."
                              "The training dataset will be truncated in block of this size for training."
                              "Default to the model max input length for single sentence inputs (take into account special tokens).")
-    parser.add_argument("--do_train", action='store_false', 
+    parser.add_argument("--do_train", action='store_false',
                         help="Whether to run training.")
-    parser.add_argument("--do_eval", action='store_true',
+    parser.add_argument("--do_eval", action='store_false',
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--do_test", action='store_false', 
+    parser.add_argument("--do_test", action='store_false',
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--evaluate_during_training", action='store_false', 
+    parser.add_argument("--evaluate_during_training", action='store_false',
                         help="Run evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
     parser.add_argument("--generate_data",
                         action='store_true', help="generate data")
 
-    parser.add_argument("--batch-size", default=8, type=int, help= "batch size")
     parser.add_argument("--train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=4, type=int,
+    parser.add_argument("--eval_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -744,10 +869,45 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=50,
                         help="random seed for initialization")
     parser.add_argument('--recreate-cache', action='store_true', help="recreate the language model cache")
-    parser.add_argument('--cache', action='store_true', help="cache old data")
 
     return parser.parse_args()
 
 
+
+def main2():
+    print("Loading model")
+
+    from transformers import pipeline
+    model = RobertaForSequenceClassification.from_pretrained("microsoft/codebert-base")
+    tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
+
+
+
+    import numpy as np
+    from datasets import load_metric
+    mdl_metrics = load_metric('accuracy')
+    def calculate_metrics(eval_pred):
+            logits, labels = eval_pred
+            predictions = np.argmax(logits, axis=-1)
+            return mdl_metrics.compute(predictions=predictions, references=labels)
+            
+    from transformers import TrainingArguments, Trainer
+
+    args = parse_args()
+
+    train_dataset = TextDataset(tokenizer, args, 'train')
+    eval_dataset= TextDataset(tokenizer, args, 'val')
+
+    if args.embedding_type == "simple_with_tokens":
+        model.resize_token_embeddings(len(tokenizer))
+
+
+    trng_args = TrainingArguments(output_dir="test_trainer", evaluation_strategy="epoch", num_train_epochs=20, resume_from_checkpoint=True)
+    trainer = Trainer(model=model, args=trng_args, train_dataset=train_dataset, eval_dataset=eval_dataset, compute_metrics=calculate_metrics)
+    trainer.train()
+
+
 if __name__ == "__main__":
-    main()
+    main2()
+
+
