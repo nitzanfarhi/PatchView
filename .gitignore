@@ -12,3 +12,6 @@ saved_models/*
 *.log
 test_trainer/*
 wandb/*
+*.git
+*.bat
+*.pickle

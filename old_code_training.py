@@ -1,17 +1,42 @@
-from __future__ import absolute_import, division, print_function
+# coding=utf-8
+# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
+# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+Fine-tuning the library models for language modeling on a text file (GPT, GPT-2, BERT, RoBERTa).
+GPT and GPT-2 are fine-tuned using a causal language modeling (CLM) loss while BERT and RoBERTa are fine-tuned
+using a masked language modeling (MLM) loss.
+"""
 
+from __future__ import absolute_import, division, print_function
+from collections import defaultdict
+import pickle
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
+from pydriller import Repository
 from transformers import (AdamW, get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
                           OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
-
+from events_datasets import GeneralDataset
+from code_model import *
 import multiprocessing
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import csv
-import pickle
+import git
+
 import json
 import difflib
 import argparse
@@ -21,6 +46,8 @@ import random
 import numpy as np
 import torch
 import datetime
+
+from misc import set_seed
 torch.cuda.empty_cache()
 from torch.utils.tensorboard import SummaryWriter
 
@@ -37,42 +64,6 @@ MODEL_CLASSES = {
     'distilbert': (DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
 }
 
-
-
-import torch
-import torch.nn as nn
-import torch
-from torch.autograd import Variable
-import copy
-from torch.nn import CrossEntropyLoss, MSELoss
-
-    
-    
-class Model(nn.Module):   
-    def __init__(self, encoder,config,tokenizer,args):
-        super(Model, self).__init__()
-        self.encoder = encoder
-        self.config=config
-        self.tokenizer=tokenizer
-        self.args=args
-    
-        
-    def forward(self, input_ids=None,labels=None): 
-        outputs=self.encoder(input_ids,attention_mask=input_ids.ne(1))[0]
-        logits=outputs
-        prob=torch.sigmoid(logits)
-        if labels is not None:
-            labels=labels.float()
-            loss=torch.log(prob[:,0]+1e-10)*labels+torch.log((1-prob)[:,0]+1e-10)*(1-labels)
-            loss=-loss.mean()
-            return loss,prob
-        else:
-            return prob
-      
-        
- 
-
-
 COMMITS_PATH = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\commits"
 MAXIMAL_FILE_SIZE = 1000000
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'max_split_size_mb:128'
@@ -82,9 +73,6 @@ INS_TOKEN='[INS]'
 DEL_TOKEN='[DEL]'
 REP_BEFORE_TOKEN='[RBT]'
 REP_AFTER_TOKEN='[RAT]'
-
-ADD_TOKEN = '[ADD]'
-DELETE_TOKEN = '[DEL]'
 
 class InputFeatures(object):
     """A single training/test features for a example."""
@@ -114,7 +102,6 @@ def convert_examples_to_features(js, tokenizer, args):
 
 
 def get_commit_from_repo(cur_repo, hash):
-    from pydriller import Repository
     return next(Repository(cur_repo, single=hash).traverse_commits())
 
 
@@ -169,89 +156,102 @@ def embed_file(file, tokenizer, args):
 
     operation_list = []
     for opp,a1,a2,b1,b2 in difflib.SequenceMatcher(a=before,b=after).get_opcodes():
-        if opp == 'equal':
-            continue
+        match opp:
+            case 'equal':
+                continue
 
-        elif opp == 'replace':
-            after_tokens = tokenizer.tokenize(after[b1:b2])
-            before_tokens = tokenizer.tokenize(before[a1:a2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [REP_BEFORE_TOKEN]
-            res += before_tokens
-            res += [REP_AFTER_TOKEN]
-            res += after_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+            case 'replace':
+                after_tokens = tokenizer.tokenize(after[b1:b2])
+                before_tokens = tokenizer.tokenize(before[a1:a2])
+                res = []
+                res += [tokenizer.cls_token]
+                res += [tokenizer.sep_token]
+                res += before_tokens
+                res += [tokenizer.sep_token]
+                res += after_tokens
+                res += [tokenizer.sep_token]
+                final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
+                operation_list.append(final_tensor)
+      
+                # after_tokens = embed_txt_and_pad(after[b1:b2], tokenizer, args)
+                # before_tokens = embed_txt_and_pad(
+                #     before[a1:a2], tokenizer, args
+                # )
+                # final_tensor = torch.sub(after_tokens,before_tokens)
+                # final_tensor[final_tensor == 0] = tokenizer.pad_token_id
 
 
-        elif opp == 'insert':
-            after_tokens = tokenizer.tokenize(after[b1:b2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [INS_TOKEN]
-            res += after_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+            case 'insert':
+                after_tokens = tokenizer.tokenize(after[b1:b2])
+                res = []
+                res += [tokenizer.cls_token]
+                res += [tokenizer.sep_token]
+                res += after_tokens
+                res += [tokenizer.sep_token]
+                final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
+                operation_list.append(final_tensor)
 
-        elif opp ==  'delete':
-            before_tokens = tokenizer.tokenize(before[a1:a2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [DEL_TOKEN]
-            res += before_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+                # final_tensor = embed_txt_and_pad(after[b1:b2], tokenizer, args)
+                # if final_tensor is None:
+                #     continue
 
-        else:
-            raise ValueError(f"Unknown operation: {opp}")
+            case 'delete':
+                before_tokens = tokenizer.tokenize(before[a1:a2])
+                res = []
+                res += [tokenizer.cls_token]
+                res += [tokenizer.sep_token]
+                res += before_tokens
+                res += [tokenizer.sep_token]
+                final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
+                operation_list.append(final_tensor)
+
+                # final_tensor = torch.sub(0,final_tensor)
+                # final_tensor[
+                #     final_tensor == -tokenizer.pad_token_id
+                # ] = tokenizer.pad_token_id
+
+            case _:
+                raise ValueError(f"Unknown operation: {opp}")
 
     return operation_list
 
-line_comment_dict = {"java":"//"}
-def get_line_comment(language):
-    if language in line_comment_dict:
-        return line_comment_dict[language]
-    else:
-        return "// "
-    
-def handle_commit(commit, tokenizer, args, language='all', embedding_type='concat'):
+def handle_commit(commit, tokenizer, args, language='all', add_sep_between_lines=True, embedding_type='concat'):
     res = []
-    for file in commit["files"]:
-
-        if language != "all" and commit["filetype"] != language.lower():
+    for file in commit.modified_files:
+        if "." not in file.filename:
             continue
+        filetype = file.filename.split(".")[-1].lower()
+        if language != "all" and filetype != language.lower():
+            continue
+        if embedding_type == 'concat':
+            source_tokens = [tokenizer.cls_token]
+
+            for line in file.diff_parsed['added']:
+                source_tokens += tokenizer.tokenize(line[1])
+                if add_sep_between_lines:
+                    source_tokens += [tokenizer.sep_token]
+            
+            if not add_sep_between_lines:
+                source_tokens += [tokenizer.sep_token]
+
+            for line in file.diff_parsed['deleted']:
+                source_tokens += tokenizer.tokenize(line[1])
+                if add_sep_between_lines:
+                    source_tokens += [tokenizer.sep_token]
+
+           
+            if len(source_tokens) > args.block_size:
+                source_tokens = source_tokens[:args.block_size]
+            else:
+                padding_length = args.block_size - len(source_tokens)
+                source_tokens += [tokenizer.pad_token_id]*padding_length
+
+            res.append(torch.tensor(tokenizer.convert_tokens_to_ids(source_tokens)))
 
         elif embedding_type == 'sum':
-            special_tokens_dict = {'additional_special_tokens': [REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
-
             embed_file_res = embed_file(file, tokenizer, args)
             if embed_file_res is not None:
-                res.append(embed_file_res)
-
-        elif embedding_type == 'simple':
-            added = [diff[1] for diff in file['added']]
-            deleted = [diff[1] for diff in file['deleted']]
-            file_res = " ".join(added+deleted)
-            file_res = tokenizer(file_res, truncation=True, padding='max_length', max_length=args.block_size)
-            res.append(file_res)            
-
-        elif embedding_type == 'simple_with_tokens':
-            special_tokens_dict = {'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
-            added = [ADD_TOKEN]+[diff[1] for diff in file['added']]+[tokenizer.sep_token]
-            deleted = [DEL_TOKEN]+[diff[1] for diff in file['deleted']]
-            file_res = " ".join(added+deleted)
-            file_res = tokenizer(file_res, truncation=True, padding='max_length', max_length=args.block_size)
-            res.append(file_res)
-        
-        elif embedding_type == 'simple_with_comments':
-            special_tokens_dict = {'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
-            added = [diff[1] for diff in file['added']]+[tokenizer.sep_token]
-            deleted = [get_line_comment(commit["filetype"])+diff[1] for diff in file['deleted']]
-
+                res += embed_file_res
 
     return res
 
@@ -281,158 +281,81 @@ def safe_makedir(path):
         pass
 
 
-    
-
-class TextDataset(Dataset):
-
-    def __init__(self, tokenizer, args, phase,  csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
-        logging.warning(f"Loading dataset {phase} {args.language}")
-        self.cache_path = f"languages_cache"
+class TextDataset(GeneralDataset):
+    def __init__(self, tokenizer, args, phase, csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"):
+        
+        safe_makedir("languages_cache")
+        self.csv_list_path = f"languages_cache\\{args.language}.csv"
         self.tokenizer = tokenizer
         self.args = args
-        self.phase = phase
-        self.cache = not args.recreate_cache
+        self.cache = args.cache
         self.language = args.language
         self.counter = 0
+        self.current_path = f"languages_cache\\{self.language}_{self.args.embedding_type}_{phase}.json"
         self.final_list = []
         self.hash_list = []
-        self.commit_path = f"{self.language}_{self.phase}.git"
 
 
         if phase == 'train':
-            with open("train_details.pickle", 'rb') as f:
+            with open(os.path.join(csv_list_dir,"train_details.pickle"), 'rb') as f:
                 self.csv_list = pickle.load(f)
         elif phase == 'val':
-            with open("validation_details.pickle", 'rb') as f:
+            with open(os.path.join(csv_list_dir,"validation_details.pickle"), 'rb') as f:
                 self.csv_list = pickle.load(f)
         elif phase == 'test':
-            with open("test_details.pickle", 'rb') as f:
+            with open(os.path.join(csv_list_dir,"test_details.pickle"), 'rb') as f:
                 self.csv_list = pickle.load(f)
         else:
             raise ValueError(f"Unknown phase: {phase}")
 
-        commit_list = self.get_commits()
-        self.create_final_list(commit_list)
 
-    def get_commits(self):
-        logging.warning("Get Commits")
-
-        result = []
-        
-        if os.path.exists(self.commit_path) and self.cache:
-            logging.warning("Get Commits from cache")
-            with open(self.commit_path, 'rb') as f:
-                return pickle.load(f)
+        print(f"Caching: {self.cache} , Path to cache: {self.current_path}: {os.path.exists(self.current_path)}")
+        if self.cache and os.path.exists(self.current_path):
+            self.final_list = torch.load(self.current_path)[:]
         else:
-            logging.warning("Get Commits from repos")
-            for repo, _, label, cur_hash in tqdm(self.csv_list[:]):
-                try:
-                    cur_hash = cur_hash.values[0]
-                    if cur_hash == "":
-                        continue
-                    result.append(self.prepare_dict(repo, label, cur_hash))
+            self.create_final_list()
+            torch.save(self.final_list, self.current_path)
 
-                except Exception as e:
-                    print(e)
-                    continue
-            with open(self.commit_path, 'wb') as f:
-                pickle.dump(result, f)
-
-            return result
-
-    def prepare_dict(self, repo, label, cur_hash):
-        commit = get_commit_from_repo(
-                        os.path.join(COMMITS_PATH, repo), cur_hash)
-        final_dict = {}
-        final_dict["name"] = commit.project_name
-        final_dict["hash"] = commit.hash
-        final_dict["files"] = []
-        final_dict["source"] = []
-        final_dict["label"] = label
-        final_dict["repo"] = repo
-        final_dict["message"] = commit.message
-
-        for file in commit.modified_files:
-            cur_dict = {}
-            before = ""
-            after = ""
-            if file.content_before is not None:
-                try:
-                    before = file.content_before.decode('utf-8')
-                except UnicodeDecodeError:
-                    continue
-            else:
-                before = ""
-
-            if file.content is not None:
-                try:
-                    after = file.content.decode('utf-8')
-                except UnicodeDecodeError:
-                    continue
-            if "." not in file.filename:
+    def create_final_list(self):
+        counter = 0
+        for repo, _, label, cur_hash in tqdm(self.csv_list[:], leave=False):
+            cur_hash = cur_hash.values[0]
+            if cur_hash == '':
+                counter+=1
                 continue
-            if len(after) > MAXIMAL_FILE_SIZE or len(before) > MAXIMAL_FILE_SIZE:
-                continue
+            commit = get_commit_from_repo(
+                os.path.join(COMMITS_PATH, repo), cur_hash)
 
-            filetype = file.filename.split(".")[-1].lower()
-            cur_dict["filetype"] = filetype
-            cur_dict["filename"] = file.filename
-            cur_dict["content"] = after
-            cur_dict["before_content"] = before
-            cur_dict["added"] = file.diff_parsed["added"]
-            cur_dict["deleted"] = file.diff_parsed["deleted"]
-            final_dict["files"].append(cur_dict)
-
-        return final_dict
-
-
-    def create_final_list(self, commit_list):
-        logging.warning("Create final list")
-        for commit in tqdm(commit_list):
             try:
                 token_arr_lst = handle_commit(
                     commit,
                     self.tokenizer,
                     self.args,
-                    language=self.language,
+                    language="",
                     embedding_type=self.args.embedding_type)
 
                 for token_arr in token_arr_lst:
                     if token_arr is not None:
-                        self.hash_list.append(f"{commit['name']}/{commit['hash']}")
-                        self.final_list.append((token_arr, int(commit['label'])))
-                
+                        self.hash_list.append(f"{repo}/{cur_hash}")
+                        self.final_list.append((token_arr, int(label)))
             except Exception as e:
                 print(e)
                 continue
-        
+
 
     def __len__(self):
         return len(self.final_list)
 
     def __getitem__(self, i):
-        encodings, label = self.final_list[i]
-        item = {key: torch.tensor(val) for key, val in encodings.items()}
-
-        item['labels'] = torch.tensor(label)
-        return item
+        source_ids, label = self.final_list[i]
+        return source_ids, torch.tensor(int(label))
 
 
 
 
-def set_seed(seed=42):
-    random.seed(seed)
-    os.environ['PYHTONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-def train(args, train_dataset, model, tokenizer, eval_dataset=None):
-    logger.warning("Configuring training")
+def oldtrain(train_dataset, model, name, args, eval_dataset=None, tokenizer=None):
     #  todo tensorboard handling https://discuss.pytorch.org/t/how-to-plot-train-and-validation-accuracy-graph/105524/2
-    writer = SummaryWriter(f"log/{args.language}/{args.embedding_type}/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
+    writer = SummaryWriter(f"log/{name}/{datetime.datetime.now().strftime('%b%d_%H-%M-%S')}")
     writer.add_text("args",json.dumps(args.__dict__, default=lambda o: '<not serializable>'))
 
     # add graph to tensorboard
@@ -482,11 +405,13 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
 
     model.zero_grad()
 
-    for idx in range(args.start_epoch, int(args.num_train_epochs)):
-        bar = tqdm(train_dataloader,leave=False)
+
+    # print("Started")
+    # history = defaultdict(list)
+    for idx in trange(args.epochs, leave=False):
         tr_num = 0
         train_loss = 0
-        for _, batch in enumerate(bar):
+        for batch in tqdm(train_dataloader, leave=False):
             inputs = batch[0].to(args.device)
             labels = batch[1].to(args.device)
             model.train()
@@ -513,41 +438,32 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                 logging_loss = tr_loss
                 tr_nb = global_step
 
-            if args.save_steps > 0 and global_step % args.save_steps == 0:
-                path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
-                torch.save({
-                            'epoch': idx,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'loss': train_loss,
-                            }, path)
-                # writer.add_scalar("Loss/train", train_loss, idx)
-                if eval_dataset:
-                    results = evaluate(args, model, tokenizer, train_dataset)
-                    writer.add_scalar("Loss/train", results['eval_loss'], idx)
-                    writer.add_scalar("Acc/train", results['eval_acc'], idx)      
+        print(f"Epoch: {idx} Loss: {avg_loss}")
+        # if args.save_steps > 0 and global_step % args.save_steps == 0:
+        #     path = os.path.join(args.output_dir, f'model_{args.model_name_or_path.replace("/","_")}_{args.embedding_type}_{args.language}.pth')
+        #     torch.save({
+        #                 'epoch': idx,
+        #                 'model_state_dict': model.state_dict(),
+        #                 'optimizer_state_dict': optimizer.state_dict(),
+        #                 'loss': train_loss,
+        #                 }, path)
+        #     writer.add_scalar("Loss/train", train_loss, idx)
+        #     if args.evaluate_during_training:
+        #         results = evaluate(
+        #             args, model, tokenizer, eval_when_training=True)
+        #         for key, value in results.items():
+        #             logger.warn("  %s = %s", key, round(value, 4))
+        #         # Save model checkpoint
+        #         writer.add_scalar("Loss/eval", results['eval_loss'], idx)
+        #         writer.add_scalar("Acc/eval", results['eval_acc'], idx)
 
-                    logger.warning("Train:")
-                    for key, value in results.items():
-                        logger.warning("  %s = %s", key, round(value, 4))
+        #         bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
 
-                    results = evaluate(args, model, tokenizer, eval_dataset)
-                    writer.add_scalar("Loss/eval", results['eval_loss'], idx)
-                    writer.add_scalar("Acc/eval", results['eval_acc'], idx)
-
-                    logger.warning("Eval:")
-                    for key, value in results.items():
-                        logger.warning("  %s = %s", key, round(value, 4))
-                    
-                    # Save model checkpoint
-                    print(f"epoch {idx} train_loss {avg_loss},  eval_loss {results['eval_loss']}, acc {results['eval_acc']} ")
-                    bar.set_description(f"epoch {idx} loss {results['eval_loss']}, acc {results['eval_acc']} ")
-
-                if results['eval_acc'] > best_acc:
-                    best_acc = results['eval_acc']
-                    imporoved_accuracy(args, model, results)
-                
-                writer.flush()
+        #     if results['eval_acc'] > best_acc:
+        #         best_acc = results['eval_acc']
+        #         imporoved_accuracy(args, model, results)
+            
+        #     writer.flush()
 
     writer.close()
 
@@ -566,14 +482,13 @@ def imporoved_accuracy(args, model, results):
         model, 'module') else model
     output_dir = os.path.join(output_dir, 'model.bin')
     torch.save(model_to_save.state_dict(), output_dir)
-    logger.warning(
+    logger.warn(
         "Saving model checkpoint to %s", output_dir)
 
 
-def evaluate(args, model, tokenizer, eval_dataset):
+def evaluate(args, model, tokenizer, eval_when_training=False):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
-
 
     safe_makedir(eval_output_dir)
 
@@ -591,7 +506,7 @@ def evaluate(args, model, tokenizer, eval_dataset):
     model.eval()
     logits = []
     labels = []
-    for batch in tqdm(eval_dataloader, leave=False):
+    for batch in eval_dataloader:
         inputs = batch[0].to(args.device)
         label = batch[1].to(args.device)
         with torch.no_grad():
@@ -615,7 +530,6 @@ def evaluate(args, model, tokenizer, eval_dataset):
 
 def test(args, model, tokenizer):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
-    eval_dataset = TextDataset(tokenizer, args, 'val')
 
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(eval_dataset)
@@ -661,8 +575,69 @@ def generate_data(language):
         writer.writerows(filtered_csv_list)
 
 
-def load_model(args, model):
-    checkpoint_prefix = f'checkpoint-best-acc-{args.language}/model.bin'
+def main():
+    # Parse Args
+    args = parse_args()
+
+    # Setup CUDA
+    args.device = torch.device(
+        "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+
+    # Setup logging
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.WARN)
+    # Set seed
+    set_seed(args.seed)
+
+    args.start_epoch = 0
+    args.start_step = 0
+    # do_checkpoint(args)
+
+    config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
+    config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
+                                          cache_dir=args.cache_dir if args.cache_dir else None)
+    config.num_labels = 1
+    tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
+                                                do_lower_case=args.do_lower_case,
+                                                cache_dir=args.cache_dir if args.cache_dir else None)
+    if args.block_size <= 0:
+        # Our input block size will be the max possible for the model
+        args.block_size = tokenizer.max_len_single_sentence
+    args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+
+    roberta = model_class(config)
+
+
+    model = Model(roberta, config, tokenizer, args)
+
+    logger.info("Training/evaluation parameters %s", args)
+
+    if args.generate_data:
+        generate_data(args.language)
+
+    if args.do_train:
+        from events_training import train as mytrain
+        mconfig = { 'batch_size': args.batch_size, "optimizer":AdamW, "lr":0.1}
+        model.to(args.device)
+        # beep_train(model, TextDataset(tokenizer,args, 'train'), args)
+        mytrain(model,mconfig, args, TextDataset(tokenizer,args, 'train'), TextDataset(tokenizer,args, 'val'), name ='code')
+        # oldtrain(TextDataset(tokenizer, args, 'train'), model, 'code', args, tokenizer=tokenizer)
+
+    if args.do_eval:
+        load_model(args, model, 'code')
+        result = evaluate(args, model, tokenizer)
+        logger.warning("***** Eval results *****")
+        for key in sorted(result.keys()):
+            logger.warning("  %s = %s", key, str(round(result[key], 4)))
+
+    if args.do_test:
+        load_model(args, model, 'code')
+        test(args, model, tokenizer, TextDataset(tokenizer, args, 'test'), 'code')
+
+
+def load_model(args, model, name):
+    checkpoint_prefix = f'checkpoint-best-acc-{name}.bin'
     output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
     model.load_state_dict(torch.load(output_dir))
     model.to(args.device)
@@ -722,22 +697,23 @@ def parse_args():
                         help="Optional input sequence length after tokenization."
                              "The training dataset will be truncated in block of this size for training."
                              "Default to the model max input length for single sentence inputs (take into account special tokens).")
-    parser.add_argument("--do_train", action='store_false',
+    parser.add_argument("--do_train", action='store_false', 
                         help="Whether to run training.")
-    parser.add_argument("--do_eval", action='store_false',
+    parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--do_test", action='store_false',
+    parser.add_argument("--do_test", action='store_false', 
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--evaluate_during_training", action='store_false',
+    parser.add_argument("--evaluate_during_training", action='store_false', 
                         help="Run evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
     parser.add_argument("--generate_data",
                         action='store_true', help="generate data")
 
+    parser.add_argument("--batch-size", default=8, type=int, help= "batch size")
     parser.add_argument("--train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=8, type=int,
+    parser.add_argument("--eval_batch_size", default=4, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -768,48 +744,10 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=50,
                         help="random seed for initialization")
     parser.add_argument('--recreate-cache', action='store_true', help="recreate the language model cache")
+    parser.add_argument('--cache', action='store_true', help="cache old data")
 
     return parser.parse_args()
 
 
-
-def main():
-    print("Loading model")
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
-    from transformers import pipeline
-    # model = RobertaForSequenceClassification.from_pretrained("microsoft/codebert-base", num_labels=2)
-    # tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
-
-    model = AutoModelForSequenceClassification.from_pretrained('mrm8488/codebert-base-finetuned-detect-insecure-code')
-    tokenizer = AutoTokenizer.from_pretrained('mrm8488/codebert-base-finetuned-detect-insecure-code')
-
-
-    import numpy as np
-    from datasets import load_metric
-    load_accuracy = load_metric("accuracy")
-    def compute_metrics(eval_pred):
-        predictions, labels = eval_pred
-        predictions = np.argmax(predictions, axis=1)
-        return load_accuracy.compute(predictions=predictions, references=labels)
-            
-    from transformers import TrainingArguments, Trainer
-
-    args = parse_args()
-
-    train_dataset = TextDataset(tokenizer, args, 'train')
-    eval_dataset= TextDataset(tokenizer, args, 'val')
-
-    if args.embedding_type == "simple_with_tokens":
-        model.resize_token_embeddings(len(tokenizer))
-
-
-    trng_args = TrainingArguments(output_dir=args.embedding_type, evaluation_strategy="epoch", num_train_epochs=args.epochs, resume_from_checkpoint=True, report_to="wandb")
-    trainer = Trainer(model=model, args=trng_args, train_dataset=train_dataset, eval_dataset=eval_dataset, compute_metrics=compute_metrics)
-    trainer.train()
-
-
 if __name__ == "__main__":
     main()
-
-
