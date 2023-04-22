@@ -404,7 +404,7 @@ def parse_args():
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", default=1e-4, type=float,
                         help="The initial learning rate for Adam.")
-    parser.add_argument("--weight_decayrunai submit build-jupyter --jupyter -g 1 --attach", default=0.0, type=float,
+    parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")
     parser.add_argument("--adam_epsilon", default=1e-8, type=float,
                         help="Epsilon for Adam optimizer.")
@@ -428,6 +428,7 @@ def parse_args():
                         help="random seed for initialization")
     parser.add_argument('--recreate-cache', action='store_true',
                         help="recreate the language model cache")
+    parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
 
     return parser.parse_args()
 
@@ -733,8 +734,16 @@ class Model(nn.Module):
 
 
 
-def main2():
-    args = parse_args()
+def main2(args):
+    if args.hyperparameter:
+        wandb.init(config=args, tags = [args.embedding_type, args.language])
+
+        args.learning_rate = wandb.config.lr
+        args.batch_size = wandb.config.batch_size
+        args.epochs = wandb.config.epochs
+        args.weight_decay = wandb.config.weight_decay
+        args.max_grad_norm = wandb.config.max_grad_norm
+
     args.epoch = args.epochs
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.n_gpu = torch.cuda.device_count()
@@ -799,7 +808,6 @@ def main2():
 
     # Training
     if args.do_train:
-        initalize_wandb(args)
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -840,16 +848,51 @@ def main2():
 
 def initalize_wandb(args):
     import wandb
-    wandb.init(project="msd",
-                # name = args.model_type + '-' + args.embedding_type + '-' + args.language,
-                tags = [args.embedding_type, args.language],
-                config = args
-                )
+    # Define sweep config
+    sweep_configuration = {
+        'method': 'random',
+        'name': 'sweep',
+        'metric': {'goal': 'maximize', 'name': 'eval_acc'},
+        'parameters': 
+        {
+            'batch_size': {'values': [16, 32, 64]},
+            'epochs': {'values': [5, 10, 15]},
+            'lr': {'max': 0.1, 'min': 1e-5},
+            'weight_decay': {'max': 0.1, 'min': 1e-5},
+            'max_grad_norm' : {'max': 5, 'min': 0},
+
+
+        }
+    }
+
+    sweep_id = wandb.sweep(
+        sweep=sweep_configuration, 
+        project='msd'
+    )
+
+
+    from functools import partial
+    if args.hyperparameter:
+        wandb.agent(sweep_id, function=partial(main2,args), count=4)
+
+    else:
+        wandb.init(project="msd",
+            # name = args.model_type + '-' + args.embedding_type + '-' + args.language,
+            tags = [args.embedding_type, args.language],
+            config = args
+            )
+
 
 if __name__ == "__main__":
 
-    
-    main2()
+
+    args = parse_args()
+
+
+    initalize_wandb(args)
+
+    if not args.hyperparameter:
+        main2(args)
 
 
 
