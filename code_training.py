@@ -33,13 +33,13 @@ import warnings
 import wandb
 
 
-_old_warn = warnings.warn
-def warn(*args, **kwargs):
+# _old_warn = warnings.warn
+# def warn(*args, **kwargs):
 
-    tb = traceback.extract_stack()
-    _old_warn(*args, **kwargs)
-    print("".join(traceback.format_list(tb)[:-1]))
-warnings.warn = warn
+#     tb = traceback.extract_stack()
+#     _old_warn(*args, **kwargs)
+#     print("".join(traceback.format_list(tb)[:-1]))
+# warnings.warn = warn
 
 
 
@@ -58,7 +58,7 @@ MODEL_CLASSES = {
 
 
 COMMITS_PATH = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\commits"
-MAXIMAL_FILE_SIZE = 1000000
+MAXIMAL_FILE_SIZE = 100000 # files bigger than that will be ignored as they are probably binaries / not code
 
 INS_TOKEN = '[INS]'
 DEL_TOKEN = '[DEL]'
@@ -87,51 +87,42 @@ def convert_to_ids_and_pad(source_tokens, tokenizer, args):
 
 def embed_file(file, tokenizer, args):
     before, after = "", ""
-    if file.content_before is not None:
-        before = file.content_before.decode('utf-8')
+    if file["before_content"] is not None:
+        before = file["before_content"]
     else:
         before = ""
 
-    if file.content is not None:
-        after = file.content.decode('utf-8')
+    if file["content"] is not None:
+        after = file["content"]
 
-    if len(before) > MAXIMAL_FILE_SIZE or len(after) > MAXIMAL_FILE_SIZE:
+    if len(before) > MAXIMAL_FILE_SIZE or len(after) > MAXIMAL_FILE_SIZE or len(before) == 0 or len(after) == 0:
         return None
 
     operation_list = []
-    for opp, a1, a2, b1, b2 in difflib.SequenceMatcher(a=before, b=after).get_opcodes():
+    opcodes = difflib.SequenceMatcher(a=before, b=after).get_opcodes()
+
+    logging.warning(f"Size Before - {len(before)}, Size After - {len(after)}, Opcode Number -  {len(opcodes)}")
+    for opp, a1, a2, b1, b2 in opcodes:
         if opp == 'equal':
             continue
 
         elif opp == 'replace':
-            after_tokens = tokenizer.tokenize(after[b1:b2])
-            before_tokens = tokenizer.tokenize(before[a1:a2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [REP_BEFORE_TOKEN]
-            res += before_tokens
-            res += [REP_AFTER_TOKEN]
-            res += after_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+            res = REP_BEFORE_TOKEN+" "+before[a1:a2]+" "+REP_AFTER_TOKEN+" "+after[b1:b2]
+            res = tokenizer(res, truncation=True,
+                    padding='max_length', max_length=args.block_size)
+            operation_list.append(res)
 
         elif opp == 'insert':
-            after_tokens = tokenizer.tokenize(after[b1:b2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [INS_TOKEN]
-            res += after_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+            res = INS_TOKEN + " " + after[b1:b2]
+            res = tokenizer(res, truncation=True,
+                    padding='max_length', max_length=args.block_size)
+            operation_list.append(res)
 
         elif opp == 'delete':
-            before_tokens = tokenizer.tokenize(before[a1:a2])
-            res = []
-            res += [tokenizer.cls_token]
-            res += [DEL_TOKEN]
-            res += before_tokens
-            final_tensor = convert_to_ids_and_pad(res, tokenizer, args)
-            operation_list.append(final_tensor)
+            res = DEL_TOKEN + " " + before[a1:a2]
+            res = tokenizer(res, truncation=True,
+                    padding='max_length', max_length=args.block_size)
+            operation_list.append(res)
 
         else:
             raise ValueError(f"Unknown operation: {opp}")
@@ -157,13 +148,10 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
             continue
 
         elif embedding_type == 'sum':
-            special_tokens_dict = {'additional_special_tokens': [
-                REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
-
             embed_file_res = embed_file(file, tokenizer, args)
             if embed_file_res is not None:
-                res.append(embed_file_res)
+                for embed in embed_file_res:
+                    res.append(embed)
 
         elif embedding_type == 'simple':
             added = [diff[1] for diff in file['added']]
@@ -174,9 +162,6 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
             res.append(file_res)
 
         elif embedding_type == 'simple_with_tokens':
-            special_tokens_dict = {
-                'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
             added = [ADD_TOKEN]+[diff[1]
                                  for diff in file['added']]+[tokenizer.sep_token]
             deleted = [DEL_TOKEN]+[diff[1] for diff in file['deleted']]
@@ -215,6 +200,8 @@ class TextDataset(Dataset):
         self.final_list_labels = []
         self.commit_path = os.path.join(args.cache_dir,f"{self.language}_{self.phase}.git")
         self.final_cache_list = os.path.join(args.cache_dir,f"{args.embedding_type}_{self.language}_{self.phase}_final_list.pickle")
+        self.positive_label_counter = 0
+        self.negative_label_counter = 0
 
         if phase == 'train':
             with open(os.path.join(args.cache_dir,"train_details.pickle"), 'rb') as f:
@@ -227,6 +214,14 @@ class TextDataset(Dataset):
                 self.csv_list = pickle.load(f)
         else:
             raise ValueError(f"Unknown phase: {phase}")
+
+
+        if self.args.embedding_type == 'simple_with_tokens':
+            logging.warning(f"Tokenizer size before adding tokens: {len(self.tokenizer)}")
+            self.tokenizer.add_special_tokens({'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]})
+        elif self.args.embedding_type == "sum":
+            self.tokenizer.add_special_tokens({'additional_special_tokens': [REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]})
+
 
         commit_list = self.get_commits()
         self.create_final_list(commit_list)
@@ -325,7 +320,13 @@ class TextDataset(Dataset):
                     if token_arr is not None:
                         self.final_list_tensors.append(torch.tensor(token_arr['input_ids']))
                         self.final_list_labels.append(torch.tensor(int(commit['label'])))
+                if int(commit['label']) == 1:
+                    self.positive_label_counter += len(token_arr_lst)
+                else:
+                    self.negative_label_counter += len(token_arr_lst)
+                
 
+                logging.warning(f"Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
             except Exception as e:
                 print(e)
                 continue
@@ -388,7 +389,7 @@ def parse_args():
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do_test", action='store_false',
                         help="Whether to run eval on the dev set.")
-    parser.add_argument("--evaluate_during_training", action='store_true',
+    parser.add_argument("--evaluate_during_training", action='store_false',
                         help="Run evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
@@ -403,7 +404,7 @@ def parse_args():
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", default=1e-4, type=float,
                         help="The initial learning rate for Adam.")
-    parser.add_argument("--weight_decay", default=0.0, type=float,
+    parser.add_argument("--weight_decayrunai submit build-jupyter --jupyter -g 1 --attach", default=0.0, type=float,
                         help="Weight deay if we apply some.")
     parser.add_argument("--adam_epsilon", default=1e-8, type=float,
                         help="Epsilon for Adam optimizer.")
@@ -431,54 +432,54 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    print("Loading model")
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# def main():
+#     args = parse_args()
+#     print("Loading model")
+#     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-    from transformers import pipeline
-    # model = RobertaForSequenceClassification.from_pretrained("microsoft/codebert-base", num_labels=2)
-    # tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
+#     from transformers import pipeline
+#     # model = RobertaForSequenceClassification.from_pretrained("microsoft/codebert-base", num_labels=2)
+#     # tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
-    tokenizer = AutoTokenizer.from_pretrained(
-        'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
+#     model = AutoModelForSequenceClassification.from_pretrained(
+#         'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
+#     tokenizer = AutoTokenizer.from_pretrained(
+#         'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
 
-    import numpy as np
-    from datasets import load_metric
-    import wandb
-    wandb.init(project="msd",
-                tags = [args.embedding_type, args.language],
-                config = args
-                )
+#     import numpy as np
+#     from datasets import load_metric
+#     import wandb
+#     wandb.init(project="msd",
+#                 tags = [args.embedding_type, args.language],
+#                 config = args
+#                 )
     
-    load_accuracy = load_metric("accuracy")
+#     load_accuracy = load_metric("accuracy")
 
-    def compute_metrics(eval_pred):
-        predictions, labels = eval_pred
-        predictions = np.argmax(predictions, axis=1)
-        return load_accuracy.compute(predictions=predictions, references=labels)
+#     def compute_metrics(eval_pred):
+#         predictions, labels = eval_pred
+#         predictions = np.argmax(predictions, axis=1)
+#         return load_accuracy.compute(predictions=predictions, references=labels)
 
-    from transformers import TrainingArguments, Trainer
-
-
-    train_dataset = TextDataset(tokenizer, args, 'train')
-    eval_dataset = TextDataset(tokenizer, args, 'val')
-
-    if args.embedding_type == "simple_with_tokens":
-        model.resize_token_embeddings(len(tokenizer))
+#     from transformers import TrainingArguments, Trainer
 
 
-    trng_args = TrainingArguments(output_dir=args.embedding_type,
-                                  evaluation_strategy="epoch",
-                                  num_train_epochs=args.epochs,
-                                  resume_from_checkpoint=True,
-                                  learning_rate=args.learning_rate,
-                                  report_to="wandb")
-    trainer = Trainer(model=model, args=trng_args, train_dataset=train_dataset,
-                      eval_dataset=eval_dataset, compute_metrics=compute_metrics)
-    trainer.train()
+#     train_dataset = TextDataset(tokenizer, args, 'train')
+#     eval_dataset = TextDataset(tokenizer, args, 'val')
+
+#     if args.embedding_type == "simple_with_tokens":
+#         model.resize_token_embeddings(len(tokenizer))
+
+
+#     trng_args = TrainingArguments(output_dir=args.embedding_type,
+#                                   evaluation_strategy="epoch",
+#                                   num_train_epochs=args.epochs,
+#                                   resume_from_checkpoint=True,
+#                                   learning_rate=args.learning_rate,
+#                                   report_to="wandb")
+#     trainer = Trainer(model=model, args=trng_args, train_dataset=train_dataset,
+#                       eval_dataset=eval_dataset, compute_metrics=compute_metrics)
+#     trainer.train()
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -497,11 +498,9 @@ import copy
 from torch.nn import CrossEntropyLoss, MSELoss
 
     
-def evaluate(args, model, tokenizer,eval_when_training=False):
+def evaluate(args, model, tokenizer,eval_dataset=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
-
-    eval_dataset = TextDataset(tokenizer, args,'val')
 
     if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(eval_output_dir)
@@ -547,7 +546,7 @@ def evaluate(args, model, tokenizer,eval_when_training=False):
     }
     return result
 
-def train(args, train_dataset, model, tokenizer):
+def train(args, train_dataset, model, tokenizer, eval_dataset=None):
     """ Train the model """ 
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
@@ -640,7 +639,7 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                     
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer,eval_when_training=True)
+                        results = evaluate(args, model, tokenizer,eval_dataset = eval_dataset)
                         for key, value in results.items():
                             logger.info("  %s = %s", key, round(value,4))                    
                         # Save model checkpoint
@@ -805,10 +804,16 @@ def main2():
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
 
         train_dataset = TextDataset(tokenizer, args, "train")
+
+        logging.warning(f"Tokenizer size after : {len(tokenizer)}")
+        model.encoder.resize_token_embeddings(len(tokenizer))
+    
+        eval_dataset = TextDataset(tokenizer, args,'val') if args.evaluate_during_training else None
+
         if args.local_rank == 0:
             torch.distributed.barrier()
             
-        train(args, train_dataset, model, tokenizer)
+        train(args, train_dataset, model, tokenizer, eval_dataset=eval_dataset)
 
 
 
@@ -836,6 +841,7 @@ def main2():
 def initalize_wandb(args):
     import wandb
     wandb.init(project="msd",
+                # name = args.model_type + '-' + args.embedding_type + '-' + args.language,
                 tags = [args.embedding_type, args.language],
                 config = args
                 )
