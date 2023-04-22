@@ -15,3 +15,4 @@ wandb/*
 *.git
 *.bat
 *.pickle
+cache_data/*
