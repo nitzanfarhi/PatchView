@@ -32,6 +32,7 @@ import warnings
 
 import wandb
 
+from code_utils import ext_to_comment
 
 # _old_warn = warnings.warn
 # def warn(*args, **kwargs):
@@ -130,12 +131,11 @@ def embed_file(file, tokenizer, args):
     return operation_list
 
 
-line_comment_dict = {"java": "//"}
 
 
 def get_line_comment(language):
-    if language in line_comment_dict:
-        return line_comment_dict[language]
+    if language in ext_to_comment:
+        return ext_to_comment[language]+" "
     else:
         return "// "
 
@@ -171,12 +171,15 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
             res.append(file_res)
 
         elif embedding_type == 'simple_with_comments':
-            special_tokens_dict = {
-                'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]}
-            tokenizer.add_special_tokens(special_tokens_dict)
-            added = [diff[1] for diff in file['added']]+[tokenizer.sep_token]
-            deleted = [get_line_comment(commit["filetype"])+diff[1]
+            added = [diff[1] for diff in file['added']]
+            deleted = [get_line_comment(file["filetype"])+diff[1]
                        for diff in file['deleted']]
+
+            file_res = " \n ".join(added+deleted)
+            
+            file_res = tokenizer(file_res, truncation=True,
+                                 padding='max_length', max_length=args.block_size)
+            res.append(file_res)
 
     return res
 def safe_makedir(path):
@@ -198,10 +201,12 @@ class TextDataset(Dataset):
         self.counter = 0
         self.final_list_tensors = []
         self.final_list_labels = []
+        self.final_commit_info = []
         self.commit_path = os.path.join(args.cache_dir,f"{self.language}_{self.phase}.git")
         self.final_cache_list = os.path.join(args.cache_dir,f"{args.embedding_type}_{self.language}_{self.phase}_final_list.pickle")
         self.positive_label_counter = 0
         self.negative_label_counter = 0
+        self.commit_repos_path = args.commit_repos_path
 
         if phase == 'train':
             with open(os.path.join(args.cache_dir,"train_details.pickle"), 'rb') as f:
@@ -224,11 +229,11 @@ class TextDataset(Dataset):
 
 
         commit_list = self.get_commits()
+        logging.warning(f"Number of commits: {len(commit_list)}")
         self.create_final_list(commit_list)
+        logging.warning(f"Number of instances: {len(self.final_list_tensors)}")
 
     def get_commits(self):
-        logging.warning("Get Commits")
-
         result = []
 
         if os.path.exists(self.commit_path):
@@ -237,16 +242,17 @@ class TextDataset(Dataset):
                 return pickle.load(f)
         else:
             logging.warning("Get Commits from repos")
-            for repo, _, label, cur_hash in tqdm(self.csv_list[:]):
+            for mdict in tqdm(self.csv_list[:]):
                 try:
-                    cur_hash = cur_hash.values[0]
+                    repo = mdict["repo_name"]
+                    label = mdict["label"]
+                    cur_hash = mdict["hash"]
                     if cur_hash == "":
                         continue
                     result.append(self.prepare_dict(repo, label, cur_hash))
-
-                except Exception as e:
-                    print(e)
+                except ValueError:
                     continue
+
             with open(self.commit_path, 'wb') as f:
                 pickle.dump(result, f)
 
@@ -254,7 +260,7 @@ class TextDataset(Dataset):
 
     def prepare_dict(self, repo, label, cur_hash):
         commit = get_commit_from_repo(
-            os.path.join(COMMITS_PATH, repo), cur_hash)
+            os.path.join(self.commit_repos_path, repo), cur_hash)
         final_dict = {}
         final_dict["name"] = commit.project_name
         final_dict["hash"] = commit.hash
@@ -262,7 +268,7 @@ class TextDataset(Dataset):
         final_dict["source"] = []
         final_dict["label"] = label
         final_dict["repo"] = repo
-        final_dict["message"] = commit.message
+        final_dict["message"] = commit.msg
 
         for file in commit.modified_files:
             cur_dict = {}
@@ -304,35 +310,34 @@ class TextDataset(Dataset):
                 cached_list = torch.load(f)
                 self.final_list_tensors = cached_list['input_ids']
                 self.final_list_labels = cached_list['labels']
+                self.final_commit_info = cached_list['commit_info']
             return
 
         logging.warning("Create final list")
-        for commit in tqdm(commit_list[:]):
-            try:
-                token_arr_lst = handle_commit(
-                    commit,
-                    self.tokenizer,
-                    self.args,
-                    language=self.language,
-                    embedding_type=self.args.embedding_type)
+        for commit in (pbar := tqdm(commit_list[:], leave=False)):
+            token_arr_lst = handle_commit(
+                commit,
+                self.tokenizer,
+                self.args,
+                language=self.language,
+                embedding_type=self.args.embedding_type)
 
-                for token_arr in token_arr_lst:
-                    if token_arr is not None:
-                        self.final_list_tensors.append(torch.tensor(token_arr['input_ids']))
-                        self.final_list_labels.append(torch.tensor(int(commit['label'])))
-                if int(commit['label']) == 1:
-                    self.positive_label_counter += len(token_arr_lst)
-                else:
-                    self.negative_label_counter += len(token_arr_lst)
-                
+            for token_arr in token_arr_lst:
+                if token_arr is not None:
+                    self.final_list_tensors.append(torch.tensor(token_arr['input_ids']))
+                    self.final_list_labels.append(torch.tensor(int(commit['label'])))
+                    self.final_commit_info.append(commit)
+            if int(commit['label']) == 1:
+                self.positive_label_counter += len(token_arr_lst)
+            else:
+                self.negative_label_counter += len(token_arr_lst)
+            
 
-                logging.warning(f"Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
-            except Exception as e:
-                print(e)
-                continue
+            pbar.set_description(f"Current Project: {commit['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
+
 
         with open(self.final_cache_list, 'wb') as f:
-            torch.save({"input_ids":self.final_list_tensors, "labels":self.final_list_labels}, f)
+            torch.save({"input_ids":self.final_list_tensors, "labels":self.final_list_labels, "commit_info": self.final_commit_info}, f)
 
         
     def __len__(self):
@@ -429,6 +434,7 @@ def parse_args():
     parser.add_argument('--recreate-cache', action='store_true',
                         help="recreate the language model cache")
     parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
+    parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
 
     return parser.parse_args()
 
@@ -544,6 +550,9 @@ def evaluate(args, model, tokenizer,eval_dataset=None):
     result = {
         "eval_loss": float(perplexity),
         "eval_acc":round(eval_acc,4),
+        "labels": labels,
+        "preds": preds,
+
     }
     return result
 
@@ -641,8 +650,9 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                     
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer,eval_dataset = eval_dataset)
-                        for key, value in results.items():
-                            logger.info("  %s = %s", key, round(value,4))                    
+                        logging.warning(f"eval_loss {float(results['eval_loss'])}")
+                        logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
+
                         # Save model checkpoint
                         
                     if results['eval_acc']>best_acc:
@@ -703,12 +713,16 @@ def test(args, model, tokenizer):
     logits=np.concatenate(logits,0)
     labels=np.concatenate(labels,0)
     preds=logits[:,0]>0.5
-    with open(os.path.join(args.output_dir,"predictions.txt"),'w') as f:
-        for example,pred in zip(eval_dataset.examples,preds):
-            if pred:
-                f.write(example.idx+'\t1\n')
-            else:
-                f.write(example.idx+'\t0\n')    
+
+    res = []
+    for example,pred in zip(eval_dataset.final_commit_info,preds):
+        res.append([example['name'], example['hash'], pred])
+
+    table = wandb.Table(columns=["Name", "Hash", "Prediction"], data=res)
+    wandb.log({"test_table": table})
+
+
+
         
 
 class Model(nn.Module):   
@@ -729,7 +743,7 @@ class Model(nn.Module):
             loss=-loss.mean()
             return loss,prob
         else:
-            return 
+            return prob
 
 
 
@@ -806,6 +820,8 @@ def main2(args):
 
     logger.info("Training/evaluation parameters %s", args)
 
+    eval_dataset = TextDataset(tokenizer, args,'val') if args.evaluate_during_training else None
+
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
@@ -816,7 +832,6 @@ def main2(args):
         logging.warning(f"Tokenizer size after : {len(tokenizer)}")
         model.encoder.resize_token_embeddings(len(tokenizer))
     
-        eval_dataset = TextDataset(tokenizer, args,'val') if args.evaluate_during_training else None
 
         if args.local_rank == 0:
             torch.distributed.barrier()
@@ -832,10 +847,11 @@ def main2(args):
             output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
             model.load_state_dict(torch.load(output_dir))      
             model.to(args.device)
-            result=evaluate(args, model, tokenizer)
+            results=evaluate(args, model, tokenizer, eval_dataset=eval_dataset)
             logger.info("***** Eval results *****")
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(round(result[key],4)))
+            logging.warning(f"eval_loss {float(results['eval_loss'])}")
+            logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
+
             
     if args.do_test and args.local_rank in [-1, 0]:
             checkpoint_prefix = 'checkpoint-best-acc/model.bin'
