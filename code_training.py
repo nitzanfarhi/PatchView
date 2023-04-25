@@ -434,6 +434,7 @@ def parse_args():
     parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
     parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
     parser.add_argument('--use_roberta_classifer', action='store_true', help="use roberta classifer")
+    parser.add_argument('--pooler_type', type=str, default="cls", help="poller type")
 
     return parser.parse_args()
 
