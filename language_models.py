@@ -32,14 +32,15 @@ class RobertaClassificationModel(nn.Module):
         self.encoder = encoder
         self.config=config
         self.tokenizer=tokenizer
-        self.classifier=PoolerClassificationHead(config)
+        self.classifier=PoolerClassificationHead(config, pooler_type=args.pooler_type)
         self.args=args
     
         
     def forward(self, input_ids=None,labels=None): 
         input_ids=input_ids.view(-1,self.args.block_size)
-        outputs = self.encoder(input_ids= input_ids,attention_mask=input_ids.ne(1))[0]
-        logits=self.classifier(outputs)
+        attention_mask=input_ids.ne(1)
+        outputs = self.encoder(input_ids= input_ids,attention_mask=attention_mask)[0]
+        logits=self.classifier(outputs, attention_mask=attention_mask)
         prob=F.softmax(logits)
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
