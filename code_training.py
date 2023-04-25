@@ -11,6 +11,7 @@ from transformers import (get_linear_schedule_with_warmup,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
                           OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
+                          RobertaConfig, RobertaModel, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
 
 import multiprocessing
@@ -33,14 +34,10 @@ import warnings
 import wandb
 
 from code_utils import ext_to_comment
+import torch.nn.functional as F
 
-# _old_warn = warnings.warn
-# def warn(*args, **kwargs):
+from language_models import PoolerClassificationHead, RobertaClassificationModel
 
-#     tb = traceback.extract_stack()
-#     _old_warn(*args, **kwargs)
-#     print("".join(traceback.format_list(tb)[:-1]))
-# warnings.warn = warn
 
 
 
@@ -53,7 +50,8 @@ MODEL_CLASSES = {
     'openai-gpt': (OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer),
     'bert': (BertConfig, BertForMaskedLM, BertTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
-    'distilbert': (DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
+    'distilbert': (DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer),
+    'roberta_classification': (RobertaConfig, RobertaModel, RobertaTokenizer)
 }
 
 
@@ -435,6 +433,7 @@ def parse_args():
                         help="recreate the language model cache")
     parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
     parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
+    parser.add_argument('--use_roberta_classifer', action='store_true', help="use roberta classifer")
 
     return parser.parse_args()
 
@@ -720,9 +719,6 @@ def test(args, model, tokenizer):
 
     table = wandb.Table(columns=["Name", "Hash", "Prediction"], data=res)
     wandb.log({"test_table": table})
-
-
-
         
 
 class Model(nn.Module):   
@@ -753,7 +749,8 @@ def main2(args):
         wandb.init(config=args, tags = [args.embedding_type, args.language])
 
         args.learning_rate = wandb.config.lr
-        args.batch_size = wandb.config.batch_size
+        args.train_batch_size = wandb.config.batch_size
+        args.eval_batch_size = wandb.config.batch_size
         args.epochs = wandb.config.epochs
         args.weight_decay = wandb.config.weight_decay
         args.max_grad_norm = wandb.config.max_grad_norm
@@ -798,7 +795,7 @@ def main2(args):
 
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
-                                          cache_dir=args.cache_dir if args.cache_dir else None)
+                                          cache_dir=args.cache_dir if args.cache_dir else None, num_labels=2)
     config.num_labels=2
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
@@ -814,7 +811,12 @@ def main2(args):
     else:
         model = model_class(config)
 
-    model=Model(model,config,tokenizer,args)
+
+    if args.use_roberta_classifer:
+        model = RobertaClassificationModel(model,config,tokenizer,args)
+    else:
+        model=Model(model,config,tokenizer,args)
+
     if args.local_rank == 0:
         torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
 
@@ -859,6 +861,7 @@ def main2(args):
             model.load_state_dict(torch.load(output_dir))                  
             model.to(args.device)
             test(args, model, tokenizer)
+            wandb.log_artifact(output_dir, type='model')
 
     return results
 
@@ -868,11 +871,11 @@ def initalize_wandb(args):
     sweep_configuration = {
         'method': 'random',
         'name': 'sweep',
-        'metric': {'goal': 'maximize', 'name': 'eval_acc'},
+        'metric': {'goal': 'minimize', 'name': 'eval_loss'},
         'parameters': 
         {
             'batch_size': {'values': [16, 32, 64]},
-            'epochs': {'values': [5, 10, 15]},
+            'epochs': {'values': [5, 10, 15,20]},
             'lr': {'max': 0.1, 'min': 1e-5},
             'weight_decay': {'max': 0.1, 'min': 1e-5},
             'max_grad_norm' : {'max': 5, 'min': 0},
@@ -889,7 +892,7 @@ def initalize_wandb(args):
 
     from functools import partial
     if args.hyperparameter:
-        wandb.agent(sweep_id, function=partial(main2,args), count=4)
+        wandb.agent(sweep_id, function=partial(main2,args), count=20)
 
     else:
         wandb.init(project="msd",
