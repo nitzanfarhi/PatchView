@@ -399,9 +399,9 @@ def parse_args():
     parser.add_argument("--generate_data",
                         action='store_true', help="generate data")
 
-    parser.add_argument("--train_batch_size", default=8, type=int,
+    parser.add_argument("--train_batch_size", default=64, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=8, type=int,
+    parser.add_argument("--eval_batch_size", default=64, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -427,14 +427,14 @@ def parse_args():
 
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=20,
                         help="random seed for initialization")
     parser.add_argument('--recreate-cache', action='store_true',
                         help="recreate the language model cache")
     parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
     parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
-    parser.add_argument('--use_roberta_classifer', action='store_true', help="use roberta classifer")
     parser.add_argument('--pooler_type', type=str, default="cls", help="poller type")
+    parser.add_argument('--dropout', type=float, default=0.1, help="dropout")
 
     return parser.parse_args()
 
@@ -755,6 +755,8 @@ def main2(args):
         args.epochs = wandb.config.epochs
         args.weight_decay = wandb.config.weight_decay
         args.max_grad_norm = wandb.config.max_grad_norm
+        args.dropout = wandb.config.dropout
+
 
     args.epoch = args.epochs
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -813,7 +815,7 @@ def main2(args):
         model = model_class(config)
 
 
-    if args.use_roberta_classifer:
+    if args.model_type=='roberta_classification':
         model = RobertaClassificationModel(model,config,tokenizer,args)
     else:
         model=Model(model,config,tokenizer,args)
@@ -876,12 +878,8 @@ def initalize_wandb(args):
         'parameters': 
         {
             'batch_size': {'values': [16, 32, 64]},
-            'epochs': {'values': [5, 10, 15,20]},
             'lr': {'max': 0.1, 'min': 1e-5},
-            'weight_decay': {'max': 0.1, 'min': 1e-5},
-            'max_grad_norm' : {'max': 5, 'min': 0},
-
-
+            'pooler_type':{ 'values': ['cls', 'avg']},
         }
     }
 
@@ -893,7 +891,7 @@ def initalize_wandb(args):
 
     from functools import partial
     if args.hyperparameter:
-        wandb.agent(sweep_id, function=partial(main2,args), count=20)
+        wandb.agent(sweep_id, function=partial(main2,args), count=30)
 
     else:
         wandb.init(project="msd",
