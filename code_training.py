@@ -800,6 +800,8 @@ def main2(args):
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                           cache_dir=args.cache_dir if args.cache_dir else None, num_labels=2)
     config.num_labels=2
+    config.hidden_dropout_prob=args.dropout
+    # config.classifier_dropout=args.dropout
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None)
@@ -815,10 +817,7 @@ def main2(args):
         model = model_class(config)
 
 
-    if args.model_type=='roberta_classification':
-        model = RobertaClassificationModel(model,config,tokenizer,args)
-    else:
-        model=Model(model,config,tokenizer,args)
+    model=Model(model,config,tokenizer,args)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
