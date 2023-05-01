@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, MSELoss
+from transformers import RobertaModel, RobertaTokenizer
 
 
 class PoolerClassificationHead(RobertaClassificationHead):
@@ -68,7 +69,7 @@ class RobertaClassificationModel(nn.Module):
 class CustomRoberta(nn.Module):
     def __init__(self, model):
           super(CustomRoberta, self).__init__()
-          self.model = model
+          self.encoder = model
           ### New layers:
           self.linear1 = nn.Linear(768, 256)
           self.linear2 = nn.Linear(256, 2) ## 3 is the number of classes in this example
@@ -76,8 +77,35 @@ class CustomRoberta(nn.Module):
     def forward(self, input_ids=None,labels=None ):
         attention_mask=input_ids.ne(1)
 
-        res = self.model(input_ids, attention_mask=attention_mask)
+        res = self.encoder(input_ids, attention_mask=attention_mask)
 
         linear1_output = self.linear1(res[0][:,0,:].view(-1,768)) ## extract the 1st token's embeddings
         linear2_output = self.linear2(linear1_output)
         return linear2_output
+    
+class RobertaClass(torch.nn.Module):
+    def __init__(self, l1):
+        super(RobertaClass, self).__init__()
+        self.encoder = l1
+        self.pre_classifier = torch.nn.Linear(768, 768)
+        self.dropout = torch.nn.Dropout(0.1)
+        self.relu = torch.nn.ReLU()
+        self.classifier = torch.nn.Linear(768, 2)
+
+    def forward(self, input_ids, labels = None):
+        attention_mask=input_ids.ne(1)
+        output_1 = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_state = output_1[1]
+        pooler = self.pre_classifier(hidden_state)
+        pooler = self.relu(pooler)
+        pooler = self.dropout(pooler)
+        logits = self.classifier(pooler)
+
+        prob=torch.sigmoid(logits)
+        if labels is not None:
+            labels=labels.float()
+            loss=torch.log(prob[:,0]+1e-10)*labels+torch.log((1-prob)[:,0]+1e-10)*(1-labels)
+            loss=-loss.mean()
+            return loss,prob
+        else:
+            return prob
