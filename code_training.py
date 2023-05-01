@@ -36,7 +36,7 @@ import wandb
 from code_utils import ext_to_comment
 import torch.nn.functional as F
 
-from language_models import PoolerClassificationHead, RobertaClass, RobertaClassificationModel
+from language_models import PoolerClassificationHead, RobertaClassificationModel
 
 
 
@@ -179,6 +179,11 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
                                  padding='max_length', max_length=args.block_size)
             res.append(file_res)
 
+        elif embedding_type == 'commit_message':
+            file_res = tokenizer(commit["message"], truncation=True,
+                                 padding='max_length', max_length=args.block_size)
+            res.append(file_res)
+
     return res
 def safe_makedir(path):
     try:
@@ -234,7 +239,7 @@ class TextDataset(Dataset):
     def get_commits(self):
         result = []
 
-        if os.path.exists(self.commit_path):
+        if False and os.path.exists(self.commit_path):
             logging.warning("Get Commits from cache")
             with open(self.commit_path, 'rb') as f:
                 return pickle.load(f)
@@ -399,13 +404,13 @@ def parse_args():
     parser.add_argument("--generate_data",
                         action='store_true', help="generate data")
 
-    parser.add_argument("--train_batch_size", default=64, type=int,
+    parser.add_argument("--train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=64, type=int,
+    parser.add_argument("--eval_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument("--learning_rate", default=1e-5, type=float,
+    parser.add_argument("--learning_rate", default=1e-4, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")
@@ -427,14 +432,15 @@ def parse_args():
 
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-    parser.add_argument('--epochs', type=int, default=20,
+    parser.add_argument('--epochs', type=int, default=50,
                         help="random seed for initialization")
     parser.add_argument('--recreate-cache', action='store_true',
                         help="recreate the language model cache")
     parser.add_argument('--hyperparameter', action='store_true', help="hyperparameter")
     parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
+    parser.add_argument('--use_roberta_classifer', action='store_true', help="use roberta classifer")
     parser.add_argument('--pooler_type', type=str, default="cls", help="poller type")
-    parser.add_argument('--dropout', type=float, default=0.1, help="dropout")
+    parser.add_argument('--train_commit_message', action='store_true', help="train commit message model")
 
     return parser.parse_args()
 
@@ -652,7 +658,6 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                         results = evaluate(args, model, tokenizer,eval_dataset = eval_dataset)
                         logging.warning(f"eval_loss {float(results['eval_loss'])}")
                         logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
-                        logging.warning(f"train_loss {round(avg_loss,4)}")
 
                         # Save model checkpoint
                         
@@ -756,14 +761,15 @@ def main2(args):
         args.epochs = wandb.config.epochs
         args.weight_decay = wandb.config.weight_decay
         args.max_grad_norm = wandb.config.max_grad_norm
-        args.dropout = wandb.config.dropout
-
 
     args.epoch = args.epochs
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.n_gpu = torch.cuda.device_count()
 
     args.device = device
+    if args.n_gpu == 0:
+        args.n_gpu = 1
+        
     args.per_gpu_train_batch_size=args.train_batch_size//args.n_gpu
     args.per_gpu_eval_batch_size=args.eval_batch_size//args.n_gpu
     # Setup logging
@@ -801,8 +807,6 @@ def main2(args):
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                           cache_dir=args.cache_dir if args.cache_dir else None, num_labels=2)
     config.num_labels=2
-    config.hidden_dropout_prob=args.dropout
-    config.classifier_dropout=args.dropout
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None)
@@ -817,8 +821,9 @@ def main2(args):
     else:
         model = model_class(config)
 
-    if args.model_type == 'roberta_classification':
-        model = RobertaClass(model, args)
+
+    if args.use_roberta_classifer:
+        model = RobertaClassificationModel(model,config,tokenizer,args)
     else:
         model=Model(model,config,tokenizer,args)
 
@@ -834,8 +839,8 @@ def main2(args):
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
 
-        train_dataset = TextDataset(tokenizer, args, "train")
 
+        train_dataset = TextDataset(tokenizer, args, "train")
         logging.warning(f"Tokenizer size after : {len(tokenizer)}")
         model.encoder.resize_token_embeddings(len(tokenizer))
     
@@ -844,7 +849,6 @@ def main2(args):
             torch.distributed.barrier()
             
         train(args, train_dataset, model, tokenizer, eval_dataset=eval_dataset)
-
 
 
     # Evaluation
@@ -880,8 +884,12 @@ def initalize_wandb(args):
         'parameters': 
         {
             'batch_size': {'values': [16, 32, 64]},
+            'epochs': {'values': [5, 10, 15,20]},
             'lr': {'max': 0.1, 'min': 1e-5},
-            'pooler_type':{ 'values': ['cls', 'avg']},
+            'weight_decay': {'max': 0.1, 'min': 1e-5},
+            'max_grad_norm' : {'max': 5, 'min': 0},
+
+
         }
     }
 
@@ -893,7 +901,7 @@ def initalize_wandb(args):
 
     from functools import partial
     if args.hyperparameter:
-        wandb.agent(sweep_id, function=partial(main2,args), count=30)
+        wandb.agent(sweep_id, function=partial(main2,args), count=20)
 
     else:
         wandb.init(project="msd",
