@@ -67,13 +67,13 @@ class RobertaClassificationModel(nn.Module):
 
 
 class CustomRoberta(nn.Module):
-    def __init__(self, model):
-          super(CustomRoberta, self).__init__()
-          self.encoder = model
-          ### New layers:
-          self.linear1 = nn.Linear(768, 256)
-          self.linear2 = nn.Linear(256, 2) ## 3 is the number of classes in this example
-
+    def __init__(self, model, args):
+        super(CustomRoberta, self).__init__()
+        self.encoder = model
+        ### New layers:
+        self.linear1 = nn.Linear(768, 256)
+        self.linear2 = nn.Linear(256, 2) ## 3 is the number of classes in this example
+        self.args = args
     def forward(self, input_ids=None,labels=None ):
         attention_mask=input_ids.ne(1)
 
@@ -84,18 +84,26 @@ class CustomRoberta(nn.Module):
         return linear2_output
     
 class RobertaClass(torch.nn.Module):
-    def __init__(self, l1):
+    def __init__(self, l1, args):
         super(RobertaClass, self).__init__()
         self.encoder = l1
         self.pre_classifier = torch.nn.Linear(768, 768)
         self.dropout = torch.nn.Dropout(0.1)
         self.relu = torch.nn.ReLU()
         self.classifier = torch.nn.Linear(768, 2)
+        self.args = args
+
 
     def forward(self, input_ids, labels = None):
         attention_mask=input_ids.ne(1)
         output_1 = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_state = output_1[1]
+
+        if self.args.pooler_type == "cls":
+            hidden_state = output_1[1]
+        elif self.args.pooler_type == "avg":
+            hidden_state = (output_1[0] * attention_mask.unsqueeze(-1)).sum(axis=-2) / attention_mask.sum(axis=-1).unsqueeze(-1)
+
+        
         pooler = self.pre_classifier(hidden_state)
         pooler = self.relu(pooler)
         pooler = self.dropout(pooler)
