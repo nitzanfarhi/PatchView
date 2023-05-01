@@ -818,7 +818,7 @@ def main2(args):
         model = model_class(config)
 
     if args.model_type == 'roberta_classification':
-        model = RobertaClass(model)
+        model = RobertaClass(model, args)
     else:
         model=Model(model,config,tokenizer,args)
 
