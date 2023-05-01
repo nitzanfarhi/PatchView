@@ -36,7 +36,7 @@ import wandb
 from code_utils import ext_to_comment
 import torch.nn.functional as F
 
-from language_models import PoolerClassificationHead, RobertaClassificationModel
+from language_models import PoolerClassificationHead, RobertaClass, RobertaClassificationModel
 
 
 
@@ -405,7 +405,7 @@ def parse_args():
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument("--learning_rate", default=1e-4, type=float,
+    parser.add_argument("--learning_rate", default=1e-5, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")
@@ -652,6 +652,7 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                         results = evaluate(args, model, tokenizer,eval_dataset = eval_dataset)
                         logging.warning(f"eval_loss {float(results['eval_loss'])}")
                         logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
+                        logging.warning(f"train_loss {round(avg_loss,4)}")
 
                         # Save model checkpoint
                         
@@ -801,7 +802,7 @@ def main2(args):
                                           cache_dir=args.cache_dir if args.cache_dir else None, num_labels=2)
     config.num_labels=2
     config.hidden_dropout_prob=args.dropout
-    # config.classifier_dropout=args.dropout
+    config.classifier_dropout=args.dropout
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None)
@@ -816,8 +817,10 @@ def main2(args):
     else:
         model = model_class(config)
 
-
-    model=Model(model,config,tokenizer,args)
+    if args.model_type == 'roberta_classification':
+        model = RobertaClass(model)
+    else:
+        model=Model(model,config,tokenizer,args)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
