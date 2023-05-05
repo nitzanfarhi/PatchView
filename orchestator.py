@@ -5,8 +5,8 @@ import traceback
 from tqdm import tqdm
 SEED = 0x1337
 
-repo_commits_location = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\repo_commits.json"
-repo_commit_code_location = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\commits"
+repo_commits_location = r"cache_data\repo_commits.json"
+repo_commit_code_location = r"D:\multisource\commits"
 
 
 TRAIN_RATE = 0.8
@@ -32,7 +32,7 @@ def get_benign_commits(repo, security_commits):
 def main():
     random.seed(SEED)
     should_split_by_repos = False
-    with open(r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\repo_commits.json", "r") as f:
+    with open(r"cache_data\repo_commits.json", "r") as f:
         data = json.load(f)
 
     if should_split_by_repos:
@@ -41,11 +41,11 @@ def main():
     else:
         training_dict, validation_dict, testing_dict = split_randomly(data)
 
-    with open("orchestrator_training.json", "w") as f:
+    with open("cache_data/orchestrator_training.json", "w") as f:
         json.dump(training_dict, f, indent=4)
-    with open("orchestrator_validation.json", "w") as f:
+    with open("cache_data/orchestrator_validation.json", "w") as f:
         json.dump(validation_dict, f, indent=4)
-    with open("orchestrator_testing.json", "w") as f:
+    with open("cache_data/orchestrator_testing.json", "w") as f:
         json.dump(testing_dict, f, indent=4)
 
 

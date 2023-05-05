@@ -44,7 +44,9 @@ from language_models import PoolerClassificationHead, RobertaClassificationModel
 cpu_cont = multiprocessing.cpu_count()
 
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
+logging.getLogger("pydriller.repository").setLevel(logging.WARNING)
+
 MODEL_CLASSES = {
     'gpt2': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
     'openai-gpt': (OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer),
@@ -183,6 +185,7 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
             file_res = tokenizer(commit["message"], truncation=True,
                                  padding='max_length', max_length=args.block_size)
             res.append(file_res)
+            break
 
     return res
 def safe_makedir(path):
@@ -211,17 +214,7 @@ class TextDataset(Dataset):
         self.negative_label_counter = 0
         self.commit_repos_path = args.commit_repos_path
 
-        if phase == 'train':
-            with open(os.path.join(args.cache_dir,"train_details.pickle"), 'rb') as f:
-                self.csv_list = pickle.load(f)
-        elif phase == 'val':
-            with open(os.path.join(args.cache_dir,"validation_details.pickle"), 'rb') as f:
-                self.csv_list = pickle.load(f)
-        elif phase == 'test':
-            with open(os.path.join(args.cache_dir,"test_details.pickle"), 'rb') as f:
-                self.csv_list = pickle.load(f)
-        else:
-            raise ValueError(f"Unknown phase: {phase}")
+        self.load_commits_and_labels(args, phase)
 
 
         if self.args.embedding_type == 'simple_with_tokens':
@@ -235,31 +228,95 @@ class TextDataset(Dataset):
         logging.warning(f"Number of commits: {len(commit_list)}")
         self.create_final_list(commit_list)
         logging.warning(f"Number of instances: {len(self.final_list_tensors)}")
+        logging.warning(f"Number of positive instances: {sum(self.final_list_labels)}")
+
+    def load_commits_and_labels(self, args, phase):
+        if phase == 'train':
+            with open(os.path.join(args.cache_dir,"orchestrator_training.json"), 'r') as f:
+                self.csv_list = json.load(f)
+        elif phase == 'val':
+            with open(os.path.join(args.cache_dir,"orchestrator_validation.json"), 'r') as f:
+                self.csv_list = json.load(f)
+        elif phase == 'test':
+            with open(os.path.join(args.cache_dir,"orchestrator_testing.json"), 'r') as f:
+                self.csv_list = json.load(f)
+        else:
+            raise ValueError(f"Unknown phase: {phase}")
+
+        # if phase == 'train':
+        #     with open(os.path.join(args.cache_dir,"train_details.pickle"), 'rb') as f:
+        #         self.csv_list = pickle.load(f)
+        # elif phase == 'val':
+        #     with open(os.path.join(args.cache_dir,"validation_details.pickle"), 'rb') as f:
+        #         self.csv_list = pickle.load(f)
+        # elif phase == 'test':
+        #     with open(os.path.join(args.cache_dir,"test_details.pickle"), 'rb') as f:
+        #         self.csv_list = pickle.load(f)
+        # else:
+        #     raise ValueError(f"Unknown phase: {phase}")
 
     def get_commits(self):
         result = []
-
-        if False and os.path.exists(self.commit_path):
+        positives = 0
+        negatives = 0
+        if os.path.exists(self.commit_path):
             logging.warning("Get Commits from cache")
             with open(self.commit_path, 'rb') as f:
                 return pickle.load(f)
         else:
             logging.warning("Get Commits from repos")
-            for mdict in tqdm(self.csv_list[:]):
-                try:
-                    repo = mdict["repo_name"]
-                    label = mdict["label"]
-                    cur_hash = mdict["hash"]
-                    if cur_hash == "":
+            for repo in (bar:=tqdm(self.csv_list)):
+                for cur_hash, label in self.csv_list[repo]:
+                    try:
+                        if cur_hash == "":
+                            assert False, "shouldnt be empty hashes here"
+                            continue
+
+                        bar.set_description(f"Repo - {repo} - Positives: {positives}, Negatives: {negatives}")
+                        result.append(self.prepare_dict(repo.replace("/","_"), label, cur_hash))
+                        if label == 1:
+                            positives += 1
+                        else:
+                            negatives += 1
+                    except Exception as e:
+                        print(e)
                         continue
-                    result.append(self.prepare_dict(repo, label, cur_hash))
-                except ValueError:
-                    continue
 
             with open(self.commit_path, 'wb') as f:
                 pickle.dump(result, f)
 
+            logging.warning(f"Positives: {positives}, Negatives: {negatives}")
             return result
+    def add_code_data_to_dict(self, file):
+            cur_dict = {}
+            before = ""
+            after = ""
+            if file.content_before is not None:
+                try:
+                    before = file.content_before.decode('utf-8')
+                except UnicodeDecodeError:
+                    return None
+            else:
+                before = ""
+
+            if file.content is not None:
+                try:
+                    after = file.content.decode('utf-8')
+                except UnicodeDecodeError:
+                    return None
+            if "." not in file.filename:
+                return None
+            if len(after) > MAXIMAL_FILE_SIZE or len(before) > MAXIMAL_FILE_SIZE:
+                return None
+
+            filetype = file.filename.split(".")[-1].lower()
+            cur_dict["filetype"] = filetype
+            cur_dict["filename"] = file.filename
+            cur_dict["content"] = after
+            cur_dict["before_content"] = before
+            cur_dict["added"] = file.diff_parsed["added"]
+            cur_dict["deleted"] = file.diff_parsed["deleted"]
+            return cur_dict
 
     def prepare_dict(self, repo, label, cur_hash):
         commit = get_commit_from_repo(
@@ -274,35 +331,9 @@ class TextDataset(Dataset):
         final_dict["message"] = commit.msg
 
         for file in commit.modified_files:
-            cur_dict = {}
-            before = ""
-            after = ""
-            if file.content_before is not None:
-                try:
-                    before = file.content_before.decode('utf-8')
-                except UnicodeDecodeError:
-                    continue
-            else:
-                before = ""
-
-            if file.content is not None:
-                try:
-                    after = file.content.decode('utf-8')
-                except UnicodeDecodeError:
-                    continue
-            if "." not in file.filename:
-                continue
-            if len(after) > MAXIMAL_FILE_SIZE or len(before) > MAXIMAL_FILE_SIZE:
-                continue
-
-            filetype = file.filename.split(".")[-1].lower()
-            cur_dict["filetype"] = filetype
-            cur_dict["filename"] = file.filename
-            cur_dict["content"] = after
-            cur_dict["before_content"] = before
-            cur_dict["added"] = file.diff_parsed["added"]
-            cur_dict["deleted"] = file.diff_parsed["deleted"]
-            final_dict["files"].append(cur_dict)
+            cur_dict = self.add_code_data_to_dict(file)
+            if cur_dict is not None:
+                final_dict["files"].append(cur_dict)
 
         return final_dict
 
@@ -330,6 +361,7 @@ class TextDataset(Dataset):
                     self.final_list_tensors.append(torch.tensor(token_arr['input_ids']))
                     self.final_list_labels.append(torch.tensor(int(commit['label'])))
                     self.final_commit_info.append(commit)
+            # print(len(token_arr_lst))
             if int(commit['label']) == 1:
                 self.positive_label_counter += len(token_arr_lst)
             else:
@@ -803,13 +835,15 @@ def main2(args):
 
         logger.info("reload model from {}, resume from {} epoch".format(checkpoint_last, args.start_epoch))
 
+    if args.cache_dir:
+        args.model_cache_dir = os.path.join(args.cache_dir, "models")
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
-                                          cache_dir=args.cache_dir if args.cache_dir else None, num_labels=2)
+                                          cache_dir=args.model_cache_dir if args.model_cache_dir else None, num_labels=2)
     config.num_labels=2
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
-                                                cache_dir=args.cache_dir if args.cache_dir else None)
+                                                cache_dir=args.model_cache_dir if args.model_cache_dir else None)
     if args.block_size <= 0:
         args.block_size = tokenizer.max_len_single_sentence  # Our input block size will be the max possible for the model
     args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
@@ -817,7 +851,7 @@ def main2(args):
         model = model_class.from_pretrained(args.model_name_or_path,
                                             from_tf=bool('.ckpt' in args.model_name_or_path),
                                             config=config,
-                                            cache_dir=args.cache_dir if args.cache_dir else None)    
+                                            cache_dir=args.model_cache_dir if args.model_cache_dir else None)    
     else:
         model = model_class(config)
 
@@ -833,7 +867,7 @@ def main2(args):
     logger.info("Training/evaluation parameters %s", args)
 
     eval_dataset = TextDataset(tokenizer, args,'val') if args.evaluate_during_training else None
-
+    test_dataset = TextDataset(tokenizer, args,'test')
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
