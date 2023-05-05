@@ -11,6 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get update
 
 WORKDIR /app_home
-COPY cache_data/ cache_data
+COPY cache_data/models cache_data/models
+COPY cache_data/*.json cache_data
+COPY cache_data/*.git cache_data
+COPY cache_data/*.pickle cache_data
 COPY *.py ./
 
