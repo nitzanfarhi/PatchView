@@ -7,7 +7,6 @@ import traceback
 import logging
 
 import pandas as pd
-import wget
 import data_graphql
 from misc import safe_mkdir
 
@@ -239,6 +238,8 @@ datasets_foldername = "datasets"
 
 
 def cve_preprocess(output_dir, cache_csv=False):
+    import wget
+
     logger.debug("Downloading CVE dataset")
     safe_mkdir(os.path.join(output_dir, datasets_foldername))
     if not cache_csv:

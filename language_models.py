@@ -83,15 +83,18 @@ class CustomRoberta(nn.Module):
         linear2_output = self.linear2(linear1_output)
         return linear2_output
     
+
 class RobertaClass(torch.nn.Module):
     def __init__(self, l1, args):
         super(RobertaClass, self).__init__()
         self.encoder = l1
-        self.pre_classifier = torch.nn.Linear(768, 768)
-        self.dropout = torch.nn.Dropout(0.1)
+        self.hidden_size = self.encoder.config.hidden_size
+        self.pre_classifier = torch.nn.Linear(self.hidden_size, self.hidden_size)
+        self.dropout = torch.nn.Dropout(args.dropout)
         self.relu = torch.nn.ReLU()
-        self.classifier = torch.nn.Linear(768, 2)
+        self.classifier = torch.nn.Linear(self.hidden_size, 2)
         self.args = args
+
 
 
     def forward(self, input_ids, labels = None):
@@ -103,12 +106,11 @@ class RobertaClass(torch.nn.Module):
         elif self.args.pooler_type == "avg":
             hidden_state = (output_1[0] * attention_mask.unsqueeze(-1)).sum(axis=-2) / attention_mask.sum(axis=-1).unsqueeze(-1)
 
-        
+
         pooler = self.pre_classifier(hidden_state)
         pooler = self.relu(pooler)
         pooler = self.dropout(pooler)
         logits = self.classifier(pooler)
-
         prob=torch.sigmoid(logits)
         if labels is not None:
             labels=labels.float()
