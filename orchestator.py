@@ -41,11 +41,11 @@ def main():
     else:
         training_dict, validation_dict, testing_dict = split_randomly(data)
 
-    with open("cache_data/orchestrator_training.json", "w") as f:
+    with open("cache_data/orchestrator_train.json", "w") as f:
         json.dump(training_dict, f, indent=4)
-    with open("cache_data/orchestrator_validation.json", "w") as f:
+    with open("cache_data/orchestrator_val.json", "w") as f:
         json.dump(validation_dict, f, indent=4)
-    with open("cache_data/orchestrator_testing.json", "w") as f:
+    with open("cache_data/orchestrator_test.json", "w") as f:
         json.dump(testing_dict, f, indent=4)
 
 
