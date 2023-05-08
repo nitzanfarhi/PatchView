@@ -4,3 +4,4 @@ datasets
 scikit-learn
 pandas
 wandb
+matplotlib

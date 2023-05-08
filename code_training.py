@@ -1,10 +1,9 @@
 from __future__ import absolute_import, division, print_function
-from torch.nn import CrossEntropyLoss, MSELoss
+
 import copy
+from torch.nn import CrossEntropyLoss, MSELoss
 from torch.autograd import Variable
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
-
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
 from transformers import (get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
@@ -26,26 +25,17 @@ import os
 import random
 import numpy as np
 import torch
-import datetime
-
-import traceback
-import warnings
-
 import wandb
+import logging
 
-from code_utils import ext_to_comment
-import torch.nn.functional as F
-
-from language_models import PoolerClassificationHead, RobertaClassificationModel
-
-
+from language_models import PoolerClassificationHead, RobertaClass, RobertaClassificationModel
 
 
 cpu_cont = multiprocessing.cpu_count()
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-logging.getLogger("pydriller.repository").setLevel(logging.WARNING)
+logger.setLevel(logging.DEBUG)
+
 
 MODEL_CLASSES = {
     'gpt2': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
@@ -60,6 +50,7 @@ MODEL_CLASSES = {
 
 COMMITS_PATH = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\commits"
 MAXIMAL_FILE_SIZE = 100000 # files bigger than that will be ignored as they are probably binaries / not code
+PROJECT_NAME = 'MSD2'
 
 INS_TOKEN = '[INS]'
 DEL_TOKEN = '[DEL]'
@@ -102,7 +93,7 @@ def embed_file(file, tokenizer, args):
     operation_list = []
     opcodes = difflib.SequenceMatcher(a=before, b=after).get_opcodes()
 
-    logging.warning(f"Size Before - {len(before)}, Size After - {len(after)}, Opcode Number -  {len(opcodes)}")
+    logger.warning(f"Size Before - {len(before)}, Size After - {len(after)}, Opcode Number -  {len(opcodes)}")
     for opp, a1, a2, b1, b2 in opcodes:
         if opp == 'equal':
             continue
@@ -134,6 +125,8 @@ def embed_file(file, tokenizer, args):
 
 
 def get_line_comment(language):
+    from code_utils import ext_to_comment
+
     if language in ext_to_comment:
         return ext_to_comment[language]+" "
     else:
@@ -198,7 +191,7 @@ def safe_makedir(path):
 class TextDataset(Dataset):
 
     def __init__(self, tokenizer, args, phase):
-        logging.warning(f"Loading dataset {phase} {args.language}")
+        logger.warning(f"Loading dataset {phase} {args.language}")
         self.tokenizer = tokenizer
         self.args = args
         self.phase = phase
@@ -218,17 +211,17 @@ class TextDataset(Dataset):
 
 
         if self.args.embedding_type == 'simple_with_tokens':
-            logging.warning(f"Tokenizer size before adding tokens: {len(self.tokenizer)}")
+            logger.warning(f"Tokenizer size before adding tokens: {len(self.tokenizer)}")
             self.tokenizer.add_special_tokens({'additional_special_tokens': [ADD_TOKEN, DEL_TOKEN]})
         elif self.args.embedding_type == "sum":
             self.tokenizer.add_special_tokens({'additional_special_tokens': [REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]})
 
 
         commit_list = self.get_commits()
-        logging.warning(f"Number of commits: {len(commit_list)}")
+        logger.warning(f"Number of commits: {len(commit_list)}")
         self.create_final_list(commit_list)
-        logging.warning(f"Number of instances: {len(self.final_list_tensors)}")
-        logging.warning(f"Number of positive instances: {sum(self.final_list_labels)}")
+        logger.warning(f"Number of instances: {len(self.final_list_tensors)}")
+        logger.warning(f"Number of positive instances: {sum(self.final_list_labels)}")
 
     def load_commits_and_labels(self, args, phase):
         if phase == 'train':
@@ -260,11 +253,11 @@ class TextDataset(Dataset):
         positives = 0
         negatives = 0
         if os.path.exists(self.commit_path):
-            logging.warning("Get Commits from cache")
+            logger.warning("Get Commits from cache")
             with open(self.commit_path, 'rb') as f:
                 return pickle.load(f)
         else:
-            logging.warning("Get Commits from repos")
+            logger.warning("Get Commits from repos")
             for repo in (bar:=tqdm(self.csv_list)):
                 for cur_hash, label in self.csv_list[repo]:
                     try:
@@ -285,7 +278,7 @@ class TextDataset(Dataset):
             with open(self.commit_path, 'wb') as f:
                 pickle.dump(result, f)
 
-            logging.warning(f"Positives: {positives}, Negatives: {negatives}")
+            logger.warning(f"Positives: {positives}, Negatives: {negatives}")
             return result
     def add_code_data_to_dict(self, file):
             cur_dict = {}
@@ -339,7 +332,7 @@ class TextDataset(Dataset):
 
     def create_final_list(self, commit_list):
         if os.path.exists(self.final_cache_list) and self.cache:
-            logging.warning("Get final list from cache")
+            logger.warning("Get final list from cache")
             with open(self.final_cache_list, 'rb') as f:
                 cached_list = torch.load(f)
                 self.final_list_tensors = cached_list['input_ids']
@@ -347,7 +340,7 @@ class TextDataset(Dataset):
                 self.final_commit_info = cached_list['commit_info']
             return
 
-        logging.warning("Create final list")
+        logger.warning("Create final list")
         for commit in (pbar := tqdm(commit_list[:], leave=False)):
             token_arr_lst = handle_commit(
                 commit,
@@ -370,9 +363,20 @@ class TextDataset(Dataset):
 
             pbar.set_description(f"Current Project: {commit['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
 
+        if self.args.balance:
+            self.balance_data()
 
         with open(self.final_cache_list, 'wb') as f:
             torch.save({"input_ids":self.final_list_tensors, "labels":self.final_list_labels, "commit_info": self.final_commit_info}, f)
+
+    def balance_data(self):
+        logger.warning("Balance data")
+        min_label = min(self.positive_label_counter, self.negative_label_counter)
+        wanted_negatives = [i for i,val in enumerate(self.final_list_labels) if val == 0][:min_label]
+        wanted_positivies = [i for i,val in enumerate(self.final_list_labels) if val == 1][:min_label]
+        self.final_list_tensors = [self.final_list_tensors[x] for x in wanted_negatives + wanted_positivies]
+        self.final_list_labels = [self.final_list_labels[x] for x in wanted_negatives + wanted_positivies]
+        logger.warning(f"Positives: {len(wanted_positivies)}, Negatives: {len(wanted_negatives)}, Total: {len(self.final_list_tensors)}")
 
         
     def __len__(self):
@@ -436,9 +440,9 @@ def parse_args():
     parser.add_argument("--generate_data",
                         action='store_true', help="generate data")
 
-    parser.add_argument("--train_batch_size", default=8, type=int,
+    parser.add_argument("--train_batch_size", default=64, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=8, type=int,
+    parser.add_argument("--eval_batch_size", default=64, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
@@ -472,7 +476,9 @@ def parse_args():
     parser.add_argument('--commit_repos_path', type=str, default=r"D:\multisource\commits")
     parser.add_argument('--use_roberta_classifer', action='store_true', help="use roberta classifer")
     parser.add_argument('--pooler_type', type=str, default="cls", help="poller type")
-    parser.add_argument('--train_commit_message', action='store_true', help="train commit message model")
+    parser.add_argument('--dropout', type=float, default=0.1, help="dropout")
+    parser.add_argument("--source_model",type=str, default = "Text", help="source model")
+    parser.add_argument("--balance", action="store_true", help="balance data to keep positives and negatives the same")
 
     return parser.parse_args()
 
@@ -688,8 +694,8 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                     
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer,eval_dataset = eval_dataset)
-                        logging.warning(f"eval_loss {float(results['eval_loss'])}")
-                        logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
+                        logger.warning(f"eval_loss {float(results['eval_loss'])}")
+                        logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
 
                         # Save model checkpoint
                         
@@ -715,11 +721,9 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
 from torch.utils.data.distributed import DistributedSampler
 
 
-
-
 def test(args, model, tokenizer):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
-    eval_dataset = TextDataset(tokenizer, args,'test')
+    eval_dataset = args.Dataset(tokenizer, args,'test')
 
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
@@ -754,9 +758,9 @@ def test(args, model, tokenizer):
 
     res = []
     for example,pred in zip(eval_dataset.final_commit_info,preds):
-        res.append([example['name'], example['hash'], pred])
+        res.append([example['name'], example['hash'], pred, example['label']])
 
-    table = wandb.Table(columns=["Name", "Hash", "Prediction"], data=res)
+    table = wandb.Table(columns=["Name", "Hash", "Prediction","Actual"], data=res)
     wandb.log({"test_table": table})
         
 
@@ -783,7 +787,7 @@ class Model(nn.Module):
 
 
 
-def main2(args):
+def main(args):
     if args.hyperparameter:
         wandb.init(config=args, tags = [args.embedding_type, args.language])
 
@@ -807,7 +811,7 @@ def main2(args):
     # Setup logging
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S',
-                        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+                        level=logging.DEBUG)
     logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
                    args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
 
@@ -841,6 +845,8 @@ def main2(args):
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                           cache_dir=args.model_cache_dir if args.model_cache_dir else None, num_labels=2)
     config.num_labels=2
+    config.hidden_dropout_prob=args.dropout
+    config.classifier_dropout=args.dropout
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.model_cache_dir if args.model_cache_dir else None)
@@ -856,8 +862,11 @@ def main2(args):
         model = model_class(config)
 
 
-    if args.use_roberta_classifer:
-        model = RobertaClassificationModel(model,config,tokenizer,args)
+    if args.model_type == "roberta_classification":
+        config.hidden_dropout_prob = args.dropout
+        config.attention_probs_dropout_prob = args.dropout
+        model = RobertaClass(model, args)
+        logger.warning("Using RobertaClass")
     else:
         model=Model(model,config,tokenizer,args)
 
@@ -865,17 +874,22 @@ def main2(args):
         torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
 
     logger.info("Training/evaluation parameters %s", args)
+    if args.source_model == "Text":
+        args.Dataset=TextDataset
+    else:
+        from events_datasets import EventsDataset
+        args.Dataset=EventsDataset
 
-    eval_dataset = TextDataset(tokenizer, args,'val') if args.evaluate_during_training else None
-    test_dataset = TextDataset(tokenizer, args,'test')
+    eval_dataset = args.Dataset(tokenizer, args,'val') if args.evaluate_during_training else None
+    test_dataset = args.Dataset(tokenizer, args,'test')
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
 
 
-        train_dataset = TextDataset(tokenizer, args, "train")
-        logging.warning(f"Tokenizer size after : {len(tokenizer)}")
+        train_dataset = args.Dataset(tokenizer, args, "train")
+        logger.warning(f"Tokenizer size after : {len(tokenizer)}")
         model.encoder.resize_token_embeddings(len(tokenizer))
     
 
@@ -894,8 +908,8 @@ def main2(args):
             model.to(args.device)
             results=evaluate(args, model, tokenizer, eval_dataset=eval_dataset)
             logger.info("***** Eval results *****")
-            logging.warning(f"eval_loss {float(results['eval_loss'])}")
-            logging.warning(f"eval_acc {round(results['eval_acc'],4)}")
+            logger.warning(f"eval_loss {float(results['eval_loss'])}")
+            logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
 
             
     if args.do_test and args.local_rank in [-1, 0]:
@@ -927,18 +941,18 @@ def initalize_wandb(args):
         }
     }
 
-    sweep_id = wandb.sweep(
-        sweep=sweep_configuration, 
-        project='msd'
-    )
 
 
     from functools import partial
     if args.hyperparameter:
-        wandb.agent(sweep_id, function=partial(main2,args), count=20)
+        sweep_id = wandb.sweep(
+            sweep=sweep_configuration, 
+            project=PROJECT_NAME
+        )
+        wandb.agent(sweep_id, function=partial(main,args), count=20)
 
     else:
-        wandb.init(project="msd",
+        wandb.init(project=PROJECT_NAME,
             # name = args.model_type + '-' + args.embedding_type + '-' + args.language,
             tags = [args.embedding_type, args.language],
             config = args
@@ -954,7 +968,7 @@ if __name__ == "__main__":
     initalize_wandb(args)
 
     if not args.hyperparameter:
-        main2(args)
+        main(args)
 
 
 
