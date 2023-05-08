@@ -27,6 +27,9 @@ import numpy as np
 import torch
 import wandb
 import logging
+from torch import optim
+
+from events_models import Conv1DTune
 
 from language_models import PoolerClassificationHead, RobertaClass, RobertaClassificationModel
 
@@ -225,13 +228,13 @@ class TextDataset(Dataset):
 
     def load_commits_and_labels(self, args, phase):
         if phase == 'train':
-            with open(os.path.join(args.cache_dir,"orchestrator_training.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orchestrator_train.json"), 'r') as f:
                 self.csv_list = json.load(f)
         elif phase == 'val':
-            with open(os.path.join(args.cache_dir,"orchestrator_validation.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orchestrator_val.json"), 'r') as f:
                 self.csv_list = json.load(f)
         elif phase == 'test':
-            with open(os.path.join(args.cache_dir,"orchestrator_testing.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orchestrator_test.json"), 'r') as f:
                 self.csv_list = json.load(f)
         else:
             raise ValueError(f"Unknown phase: {phase}")
@@ -721,10 +724,7 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
 from torch.utils.data.distributed import DistributedSampler
 
 
-def test(args, model, tokenizer):
-    # Loop to handle MNLI double evaluation (matched, mis-matched)
-    eval_dataset = args.Dataset(tokenizer, args,'test')
-
+def test(args, model, tokenizer, eval_dataset):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
@@ -876,22 +876,35 @@ def main(args):
     logger.info("Training/evaluation parameters %s", args)
     if args.source_model == "Text":
         args.Dataset=TextDataset
-    else:
+        train_dataset = args.Dataset(tokenizer, args, "train")
+        eval_dataset = args.Dataset(tokenizer, args,'val')
+        test_dataset = args.Dataset(tokenizer, args,'test')
+        logger.warning(f"Tokenizer size after : {len(tokenizer)}")
+        model.encoder.resize_token_embeddings(len(tokenizer))
+
+    elif args.source_model == "Events":
         from events_datasets import EventsDataset
         args.Dataset=EventsDataset
+        train_dataset = args.Dataset(args, "train")
+        eval_dataset = args.Dataset(args,'val')
+        test_dataset = args.Dataset(args,'test')
 
-    eval_dataset = args.Dataset(tokenizer, args,'val') if args.evaluate_during_training else None
-    test_dataset = args.Dataset(tokenizer, args,'test')
+        xshape1 = train_dataset[0][0].shape[0]
+        xshape2 = train_dataset[0][0].shape[1]
+        events_config = {'l1': 64, 'l2': 32, 'l3': 16,
+                'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
+                'optimizer': optim.Adam}
+        model = Conv1DTune(args,
+            xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
+        model = model.to(args.device)
+
+    else:
+        raise NotImplementedError
+
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
-
-
-        train_dataset = args.Dataset(tokenizer, args, "train")
-        logger.warning(f"Tokenizer size after : {len(tokenizer)}")
-        model.encoder.resize_token_embeddings(len(tokenizer))
-    
 
         if args.local_rank == 0:
             torch.distributed.barrier()
@@ -917,7 +930,7 @@ def main(args):
             output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
             model.load_state_dict(torch.load(output_dir))                  
             model.to(args.device)
-            test(args, model, tokenizer)
+            test(args, model, tokenizer, test_dataset)
             wandb.log_artifact(output_dir, type='model')
 
     return results

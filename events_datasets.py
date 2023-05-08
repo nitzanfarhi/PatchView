@@ -9,61 +9,68 @@ import json
 import pandas as pd
 import os
 
-from data_creation import gh_cve_dir, repo_metadata_filename
+from data_creation import gh_cve_dir
 
 csv_list_dir=r"C:\Users\nitzan\local\analyzeCVE"
 
 class EventsDataset(GeneralDataset):
-    def __init__(self, hash_list, set_name, cache=True, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
-        self.hash_list = hash_list
+    def __init__(self, args, set_name, cache=True, backs = 10, input_path = r"C:\Users\nitzan\local\analyzeCVE\data_collection\data"):
         self.backs = backs
+        self.args = args
         self.x_set = []
         self.y_set = []
         self.info = []
-        self.current_path = f"languages_cache\\events_{set_name}.json"
-        self.cache = cache
+        self.current_path = f"cache_data\\events\\events_{set_name}.json"
+        self.cache = not args.recreate_cache
+        with open(os.path.join(args.cache_dir,f"orchestrator_{set_name}.json"), 'r') as f:
+            self.hash_list = json.load(f)
+        
         if self.cache and os.path.exists(self.current_path):
             x_set, y_set = torch.load(self.current_path)
             self.x_set = x_set
             self.y_set = y_set
         else:
-            self.create_list_of_hashes(hash_list, input_path )
+            self.create_list_of_hashes(input_path )
             torch.save((self.x_set, self.y_set), self.current_path)
 
 
-    def create_list_of_hashes(self, hash_list, input_path):
+    def create_list_of_hashes(self, input_path):
         repo_dict = {}
-        all_metadata = json.load(open(os.path.join(input_path,repo_metadata_filename), 'r'))
-        for repo,_,label, mhash in tqdm(list(hash_list)[:], leave=False):
-            mhash = mhash.iloc[0]
-            if mhash == "":
-                continue
-            repo_name = repo.replace("/", "_")
-            if repo_name not in repo_dict:
+        with open(os.path.join(self.args.cache_dir,"events","repo_metadata.json"), 'r') as f:
+            all_metadata = json.load(f)
+        for repo in tqdm(self.hash_list, leave=False):
+            for mhash, label in self.hash_list[repo]:
                 try:
-                    cur_repo = pd.read_parquet(f"{input_path}\{gh_cve_dir}\{repo_name}.parquet")
-                    cur_repo = fix_repo_idx(cur_repo)
-                    cur_repo = fix_repo_shape(cur_repo) 
-                    repo_dict[repo_name] = cur_repo
-                except FileNotFoundError:
-                    print(f"File not found: {repo_name}")
-                    continue
-            else:
-                cur_repo = repo_dict[repo_name]
+                    if mhash == "":
+                        continue
+                    repo_name = repo.replace("/", "_")
+                    if repo_name not in repo_dict:
+                        try:
+                            cur_repo = pd.read_parquet(f"{input_path}\{gh_cve_dir}\{repo_name}.parquet")
+                            cur_repo = fix_repo_idx(cur_repo)
+                            cur_repo = fix_repo_shape(cur_repo) 
+                            repo_dict[repo_name] = cur_repo
+                        except FileNotFoundError:
+                            print(f"File not found: {repo_name}")
+                            continue
+                    else:
+                        cur_repo = repo_dict[repo_name]
 
 
-            wanted_row = cur_repo.index[cur_repo['Hash'] == mhash].tolist()
-            if len(wanted_row) == 0:
-                continue
-            assert len(wanted_row) == 1, "Hash is not unique"             
-            wanted_row = wanted_row[0]
-            self.info.append((repo_name,mhash))
-            event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
-            event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
-            event_window = event_window.drop(["Hash","Vuln"], axis = 1)
-            event_window = event_window.fillna(0)
-            self.x_set.append(event_window.values)
-            self.y_set.append(label)
+                    wanted_row = cur_repo.index[cur_repo['Hash'] == mhash].tolist()
+                    if len(wanted_row) == 0:
+                        continue
+                    assert len(wanted_row) == 1, "Hash is not unique"             
+                    wanted_row = wanted_row[0]
+                    self.info.append((repo_name,mhash))
+                    event_window = get_event_window(cur_repo,wanted_row, backs=self.backs)
+                    event_window = add_metadata(input_path, all_metadata, event_window, repo_name)
+                    event_window = event_window.drop(["Hash","Vuln"], axis = 1)
+                    event_window = event_window.fillna(0)
+                    self.x_set.append(event_window.values)
+                    self.y_set.append(label)
+                except KeyError as e:
+                    print(e)
 
 
     def __len__(self):
@@ -72,7 +79,7 @@ class EventsDataset(GeneralDataset):
     def __getitem__(self, idx):
         item = self.x_set[idx]
         label = self.y_set[idx]
-        item = torch.from_numpy(item).float()
+        item = torch.from_numpy(item.astype(float)).float()
         return item, label
 
 

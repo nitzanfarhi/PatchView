@@ -125,7 +125,7 @@ class Conv1D(nn.Module):
 
 
 class Conv1DTune(nn.Module):
-    def __init__(self, xshape1, xshape2, l1 = 1024,l2 = 256, l3 = 256, l4 = 64, dropout = 0.5):
+    def __init__(self, args, xshape1, xshape2, l1 = 1024,l2 = 256, l3 = 256, l4 = 64, dropout = 0.5):
         super(Conv1DTune, self).__init__()
         self.xshape1 = xshape1
         self.xshape2 = xshape2
@@ -135,15 +135,15 @@ class Conv1DTune(nn.Module):
         self.batchnorm2 = nn.BatchNorm1d(l1)
 
         self.pool = nn.MaxPool1d(kernel_size=2)
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=args.dropout)
         self.fc1 = nn.Linear(l2 * ((self.xshape2 // 2) ), l1)
         self.fc2 = nn.Linear(l1, l3)
         self.fc3 = nn.Linear(l3, l4)
-        self.fc4 = nn.Linear(l4, 1)
+        self.fc4 = nn.Linear(l4, 2)
         self.activation = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x):
+    def forward(self, x, labels=None):
         x = self.activation(self.conv(x))
         x = self.batchnorm1(x)
         x = self.pool(x)
@@ -157,5 +157,12 @@ class Conv1DTune(nn.Module):
         x = self.activation(self.fc3(x))
         x = self.dropout(x)
         x = self.sigmoid(self.fc4(x))
-        return x
+
+        if labels is None:
+            return x
+        labels=labels.float()
+        loss=torch.log(x[:,0]+1e-10)*labels+torch.log((1-x)[:,0]+1e-10)*(1-labels)
+        loss=-loss.mean()
+
+        return loss, x
     
