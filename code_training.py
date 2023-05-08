@@ -1,10 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
-import copy
-from torch.nn import CrossEntropyLoss, MSELoss
-from torch.autograd import Variable
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, TensorDataset
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
 from transformers import (get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
@@ -15,7 +12,6 @@ from transformers import (get_linear_schedule_with_warmup,
 
 import multiprocessing
 from tqdm import tqdm
-import csv
 import pickle
 import json
 import difflib
@@ -30,9 +26,7 @@ import logging
 from torch import optim
 
 from events_models import Conv1DTune
-
-from language_models import PoolerClassificationHead, RobertaClass, RobertaClassificationModel
-
+from language_models import  RobertaClass
 
 cpu_cont = multiprocessing.cpu_count()
 
@@ -204,8 +198,8 @@ class TextDataset(Dataset):
         self.final_list_tensors = []
         self.final_list_labels = []
         self.final_commit_info = []
-        self.commit_path = os.path.join(args.cache_dir,f"{self.language}_{self.phase}.git")
-        self.final_cache_list = os.path.join(args.cache_dir,f"{args.embedding_type}_{self.language}_{self.phase}_final_list.pickle")
+        self.commit_path = os.path.join(args.cache_dir,"code",f"{self.language}_{self.phase}.git")
+        self.final_cache_list = os.path.join(args.cache_dir,"code",f"{args.embedding_type}_{self.language}_{self.phase}_final_list.pickle")
         self.positive_label_counter = 0
         self.negative_label_counter = 0
         self.commit_repos_path = args.commit_repos_path
@@ -228,28 +222,17 @@ class TextDataset(Dataset):
 
     def load_commits_and_labels(self, args, phase):
         if phase == 'train':
-            with open(os.path.join(args.cache_dir,"orchestrator_train.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orc","orchestrator_train.json"), 'r') as f:
                 self.csv_list = json.load(f)
         elif phase == 'val':
-            with open(os.path.join(args.cache_dir,"orchestrator_val.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orc","orchestrator_val.json"), 'r') as f:
                 self.csv_list = json.load(f)
         elif phase == 'test':
-            with open(os.path.join(args.cache_dir,"orchestrator_test.json"), 'r') as f:
+            with open(os.path.join(args.cache_dir,"orc","orchestrator_test.json"), 'r') as f:
                 self.csv_list = json.load(f)
         else:
             raise ValueError(f"Unknown phase: {phase}")
 
-        # if phase == 'train':
-        #     with open(os.path.join(args.cache_dir,"train_details.pickle"), 'rb') as f:
-        #         self.csv_list = pickle.load(f)
-        # elif phase == 'val':
-        #     with open(os.path.join(args.cache_dir,"validation_details.pickle"), 'rb') as f:
-        #         self.csv_list = pickle.load(f)
-        # elif phase == 'test':
-        #     with open(os.path.join(args.cache_dir,"test_details.pickle"), 'rb') as f:
-        #         self.csv_list = pickle.load(f)
-        # else:
-        #     raise ValueError(f"Unknown phase: {phase}")
 
     def get_commits(self):
         result = []
@@ -394,7 +377,7 @@ def parse_args():
 
     parser.add_argument("--embedding-type","-et", default="simple", type=str)
 
-    parser.add_argument("--output_dir", default='./saved_models', type=str,
+    parser.add_argument("--output_dir", default='./cache_data/saved_models', type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="For distributed training: local_rank")

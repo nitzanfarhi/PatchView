@@ -16,3 +16,4 @@ wandb/*
 *.bat
 *.pickle
 cache_data/*
+Sandbox.ipynb
