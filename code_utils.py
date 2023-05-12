@@ -5,7 +5,7 @@ import urllib
 ext_to_comment = {}
 try:
     pldb = pd.read_csv("https://pldb.com/pldb.csv", low_memory=False)
-    for i , row in pldb.iterrows():
+    for i, row in pldb.iterrows():
         if type(row["fileExtensions"]) != str or type(row["lineCommentToken"]) != str:
             continue
 

@@ -17,3 +17,5 @@ wandb/*
 *.pickle
 cache_data/*
 Sandbox.ipynb
+artifacts/*
+test_table.table.json/*

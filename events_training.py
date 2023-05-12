@@ -39,7 +39,7 @@ def accuracy(model, device, dataloader):
     model.eval()
     max_acc = 0
     final_threshold = 0
-    for i in range(1,100):
+    for i in range(1, 100):
         total_correct = 0
         total_instances = 0
 
@@ -80,7 +80,7 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
         'val_loss': [],
         'val_acc': []
     }
-    
+
     best_val_accuracy = 0
     for epoch in trange(args.epochs):
         losses = []
@@ -102,8 +102,6 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
             losses.append(float(loss))
             pbar.set_description(f"curloss - {loss}")
 
-
-
         avg_loss = np.mean(losses)
 
         if validation_dataset is not None:
@@ -124,13 +122,14 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
         history['val_loss'].append(avg_valid_loss)
         if calc_acc:
             history['acc'].append(accuracy(model, args.device, train_loader))
-            history['val_acc'].append(accuracy(model, args.device, valid_loader))
+            history['val_acc'].append(
+                accuracy(model, args.device, valid_loader))
         else:
             history['acc'].append(0)
             history['val_acc'].append(0)
 
             print(
-                 f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
+                f'Epoch {epoch} - loss: {avg_loss} - val_loss: {avg_valid_loss} - acc: {history["acc"][-1]} - val_acc: {history["val_acc"][-1]}')
 
         writer.add_scalars('Loss', {
                            "train": history['loss'][-1],
@@ -141,7 +140,7 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
                            "train": history['acc'][-1],
                            "validation": history['val_acc'][-1]},
                            epoch)
-        
+
         writer.add_scalar("loss/eval", history['val_loss'][-1], epoch)
         writer.add_scalar("acc/eval", history['val_acc'][-1], epoch)
         writer.add_scalar("loss/train", history['loss'][-1], epoch)
@@ -152,7 +151,6 @@ def train(model, config, args=None, train_dataset=None, validation_dataset=None,
             checkpoint_prefix = f'checkpoint-best-acc-events.bin'
             output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
             torch.save(model.state_dict(), output_dir)
-
 
     return history
 
@@ -176,7 +174,7 @@ def evaluate(args, model, valid_loader, criterion, optimizer, device):
         valid_losses.append(valid_loss.detach().numpy())
         print(f'valid_loss {valid_loss}')
 
-    return valid_losses / len(valid_loader) 
+    return valid_losses / len(valid_loader)
 
 
 def test(args, model, dataset, name):
@@ -209,12 +207,12 @@ def test(args, model, dataset, name):
             else:
                 f.write(str(example)+'\t0\n')
 
+
 def load_model(args, model, name):
     checkpoint_prefix = f'checkpoint-best-acc-{name}.bin'
     output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
     model.load_state_dict(torch.load(output_dir))
     model.to(args.device)
-
 
 
 def set_seed(seed=SEED):
@@ -237,8 +235,8 @@ def main():
     # Set seed
     set_seed(SEED)
 
-
-    train_dataset, validation_datatest, test_dataset = create_datasets(EventsDataset, backs=args.backs, cache = args.cache)
+    train_dataset, validation_datatest, test_dataset = create_datasets(
+        EventsDataset, backs=args.backs, cache=args.cache)
     xshape1 = train_dataset[0][0].shape[0]
     xshape2 = train_dataset[0][0].shape[1]
 
@@ -246,8 +244,8 @@ def main():
     args.start_step = 0
 
     config = {'l1': 64, 'l2': 32, 'l3': 16,
-                'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
-                'optimizer': optim.Adam}
+              'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
+              'optimizer': optim.Adam}
 
     args.device = torch.device(
         "cuda:0" if torch.cuda.is_available() else "cpu")
@@ -264,12 +262,12 @@ def main():
         optimizer = config['optimizer'](model.parameters(), lr=config['lr'])
         criterion = nn.BCEWithLogitsLoss()
         device = args.device
-        evaluate(args, model, validation_datatest, criterion, optimizer, device)
+        evaluate(args, model, validation_datatest,
+                 criterion, optimizer, device)
 
     if args.do_test:
         load_model(args, model, 'events')
         test(args, model, test_dataset, 'events')
-
 
     if args.hypertune:
         hypertune(train_dataset, validation_datatest, xshape1, xshape2, args)
@@ -336,7 +334,6 @@ def parse_args():
                         help="Number of back commits to use for training.")
     parser.add_argument('--cache', action='store_true', help="cache old data")
     parser.add_argument("--output_dir", default="saved_models", type=str)
-                        
 
     return parser.parse_args()
 

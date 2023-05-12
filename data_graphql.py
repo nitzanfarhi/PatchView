@@ -202,8 +202,12 @@ less_than_10_vulns = [
 OUTPUT_DIRNAME = 'graphql'
 
 # copied from https://github.com/n0vad3v/get-profile-data-of-repo-stargazers-graphql
+try:
+    token = open(r'C:\secrets\github_token.txt', 'r').read()
+except FileNotFoundError:
+    print("Token not found.")
+    token = ""
 
-token = open(r'C:\secrets\github_token.txt', 'r').read()
 headers = {"Authorization": "token " + token}
 
 generalQL = """

@@ -5,8 +5,8 @@ import json
 import numpy as np
 import tqdm
 import pandas as pd
-import random 
-import pickle 
+import random
+import pickle
 from misc import safe_mkdir
 from data_creation import gh_cve_dir, repo_metadata_filename
 from misc import find_best_accuracy, find_best_f1, EnumAction, safe_mkdir
@@ -33,6 +33,7 @@ VULN_TAG = 1
 
 logger = logging.getLogger(__name__)
 
+
 class Aggregate(Enum):
     none = "none"
     before_cve = "before"
@@ -56,8 +57,6 @@ def make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days, hours,
 
     logger.debug(name_template)
     return name_template
-
-
 
 
 def extract_window(aggr_options, hours, days, resample, backs, file,
@@ -103,7 +102,8 @@ def create_dataset(data_path,
     safe_mkdir(DATASET_DIRNAME)
     safe_mkdir(DATASET_DIRNAME + dirname)
     cve_dir = os.path.join(data_path, gh_cve_dir)
-    all_metadata = json.load(open(os.path.join(data_path,repo_metadata_filename), 'r'))
+    all_metadata = json.load(
+        open(os.path.join(data_path, repo_metadata_filename), 'r'))
     counter = 0
     for file in (pbar := tqdm.tqdm(os.listdir(cve_dir)[:])):
 
@@ -118,9 +118,9 @@ def create_dataset(data_path,
         repo_holder = Repository()
         repo_holder.file = file
         tqdm_update("read")
-        if not os.path.exists(os.path.join(cve_dir,file + ".parquet")):
+        if not os.path.exists(os.path.join(cve_dir, file + ".parquet")):
             try:
-                cur_repo = pd.read_csv(os.path.join(cve_dir,file + ".csv"),
+                cur_repo = pd.read_csv(os.path.join(cve_dir, file + ".csv"),
                                        low_memory=False,
                                        parse_dates=['created_at'],
                                        dtype={
@@ -131,14 +131,15 @@ def create_dataset(data_path,
                                            "Del": np.float64,
                                            "Files": np.float64,
                                            "Vuln": np.float64
-                                       })
+                })
             except pd.errors.EmptyDataError:
                 continue
 
             cur_repo.to_parquet(os.path.join(cve_dir, file + ".parquet"))
 
         else:
-            cur_repo = pd.read_parquet(os.path.join(cve_dir, file + ".parquet"))
+            cur_repo = pd.read_parquet(
+                os.path.join(cve_dir, file + ".parquet"))
 
         if cur_repo.shape[0] < 100:
             ignored.append(file)
@@ -153,7 +154,8 @@ def create_dataset(data_path,
 
         if metadata:
             tqdm_update("add metadata")
-            cur_repo = add_metadata(data_path, all_metadata, cur_repo, file, repo_holder)
+            cur_repo = add_metadata(
+                data_path, all_metadata, cur_repo, file, repo_holder)
 
         tqdm_update("fix_repo_shape")
         cur_repo = fix_repo_shape(all_set,
@@ -201,7 +203,6 @@ def create_dataset(data_path,
     return all_repos, cur_repo.columns
 
 
-
 def extract_dataset(aggr_options=Aggregate.before_cve,
                     benign_vuln_ratio=1,
                     hours=0,
@@ -226,10 +227,10 @@ def extract_dataset(aggr_options=Aggregate.before_cve,
 
     dirname = make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days,
                                 hours, resample, metadata, comment)
-    path_name = os.path.join(cache_location,dirname)
+    path_name = os.path.join(cache_location, dirname)
     if (cache and os.path.isdir(path_name)
             and len(os.listdir(path_name)) != 0
-            and os.path.isfile(os.path.join(path_name,"column_names.pkl"))):
+            and os.path.isfile(os.path.join(path_name, "column_names.pkl"))):
 
         logger.info(f"Loading Dataset {dirname}")
         all_repos = []
@@ -238,11 +239,12 @@ def extract_dataset(aggr_options=Aggregate.before_cve,
                 with open(os.path.join(path_name, file), 'rb') as f:
                     repo = pickle.load(f)
                     all_repos.append(repo)
-            column_names = pickle.load(open(os.path.join(path_name, "column_names.pkl"), 'rb'))
+            column_names = pickle.load(
+                open(os.path.join(path_name, "column_names.pkl"), 'rb'))
         except AttributeError:
             logger.info(f"Malformed dataset - Creating Dataset {dirname}")
-            all_repos, column_names = create_dataset(data_location, 
-                aggr_options, benign_vuln_ratio, hours, days, resample, backs,metadata=metadata,comment=comment)            
+            all_repos, column_names = create_dataset(data_location,
+                                                     aggr_options, benign_vuln_ratio, hours, days, resample, backs, metadata=metadata, comment=comment)
     else:
         logger.info(f"Creating Dataset {dirname}")
         all_repos, column_names = create_dataset(data_location,
@@ -269,7 +271,8 @@ def fix_repo_idx(cur_repo):
     cur_repo = cur_repo[cur_repo.index.notnull()]
     cur_repo['idx'] = range(len(cur_repo))
     cur_repo = cur_repo.reset_index().set_index(["created_at", "idx"])
-    cur_repo = cur_repo.reset_index().drop(["created_at"], axis=1).set_index("idx")
+    cur_repo = cur_repo.reset_index().drop(
+        ["created_at"], axis=1).set_index("idx")
     return cur_repo
 
 
@@ -313,10 +316,9 @@ def add_type_one_hot_encoding(df):
     return df
 
 
-
 def get_event_window(cur_repo_data,
                      event,
-                     aggr_options = Aggregate.before_cve,
+                     aggr_options=Aggregate.before_cve,
                      days=10,
                      hours=10,
                      backs=50,
@@ -364,17 +366,18 @@ def get_event_window(cur_repo_data,
             res = pd.concat([res, new_row], ignore_index=False)
 
     elif aggr_options == Aggregate.only_before:
-        res = cur_repo_data[event[1] - backs -1 :event[1]-1]
+        res = cur_repo_data[event[1] - backs - 1:event[1]-1]
 
     elif aggr_options == Aggregate.none:
         res = cur_repo_data.reset_index().drop(
             ["created_at"],
             axis=1).set_index("idx")[event[1] - backs:event[1] + befs]
-        
+
     if res.shape[0] < 20:
         print(before_res.shape)
         print(res.shape)
     return res
+
 
 def pad_and_fix(all_repos):
     to_pad = 0
@@ -411,7 +414,6 @@ def split_repos(repos, train_size):
             test_repos.append(repo)
         vuln_counter += cur_vuln_counter
     return train_repos, test_repos, train_repo_counter
-
 
 
 def split_into_x_and_y(repos,
