@@ -9,7 +9,8 @@ import json
 import pandas as pd
 import os
 
-from data_creation import gh_cve_dir
+import logging
+logger = logging.getLogger(__name__)
 
 
 class EventsDataset(GeneralDataset):
@@ -28,11 +29,13 @@ class EventsDataset(GeneralDataset):
             self.hash_list = json.load(f)
 
         if self.cache and os.path.exists(self.current_path):
+            logger.warning(f"Loading {set_name} from cache - {self.current_path}")
             x_set, y_set, final_commit_info = torch.load(self.current_path)
             self.x_set = x_set
             self.y_set = y_set
             self.final_commit_info = final_commit_info
         else:
+            logger.warning(f"Creating {set_name} from scratch - {self.current_path}")
             self.create_list_of_hashes()
             torch.save((self.x_set, self.y_set,
                        self.final_commit_info), self.current_path)
