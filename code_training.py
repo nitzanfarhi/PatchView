@@ -967,8 +967,6 @@ def initalize_wandb(args):
             'lr': {'max': 0.1, 'min': 1e-5},
             'weight_decay': {'max': 0.1, 'min': 1e-5},
             'max_grad_norm': {'max': 5, 'min': 0},
-
-
         }
     }
 
