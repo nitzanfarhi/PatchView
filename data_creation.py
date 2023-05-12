@@ -63,10 +63,9 @@ ref_keys = [
 ]
 EXTENSION_NUM = 300
 github_list = ['MLIST', 'CONFIRM', 'MISC', 'URL', 'CONFIRM', 'XF', 'MISC']
-DATE_COLUMNS = ["vulnerabilityAlerts","forks","issues","pullRequests","releases","stargazers"]
+DATE_COLUMNS = ["vulnerabilityAlerts", "forks",
+                "issues", "pullRequests", "releases", "stargazers"]
 github_counter = 0
-
-
 
 
 def ref_parser(ref_row):
@@ -105,10 +104,6 @@ def handle_duplicate_key(key, ret_dict, val):
             break
     if not found:
         raise RuntimeError(f'{key} already in dict')
-
-
-# token = open(r'C:\secrets\github_token.txt', 'r').read()
-# g = Github(token)
 
 
 def gather_pages(obj):

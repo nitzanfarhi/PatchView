@@ -73,12 +73,10 @@ all_langs = [
 ]
 
 
-
 class Set(Enum):
     train = 1
     validation = 2
     test = 3
-
 
 
 class Repository:
@@ -183,11 +181,12 @@ def draw_timeline(name, vulns, first_date, last_date):
     values[-1] = 2
     values[-2] = 2
 
-    string_dates = pd.to_datetime(dates).strftime("%Y-%m-%d %H:%M:%S").tolist() 
-    
+    string_dates = pd.to_datetime(dates).strftime("%Y-%m-%d %H:%M:%S").tolist()
+
     fig, ax = plt.subplots(figsize=(6, 1))
-    
-    ax.scatter(string_dates.tolist(), [1] * len(string_dates), c=values, marker='s', s=100)
+
+    ax.scatter(string_dates.tolist(), [
+               1] * len(string_dates), c=values, marker='s', s=100)
 
     fig.autofmt_xdate()
 
@@ -282,9 +281,13 @@ def get_predictions(model, x_test_scaled, threshold):
     return anomaly_mask.map(lambda x: 0.0 if x == True else 1.0)
 
 
-token = open(r'C:\secrets\github_token.txt', 'r').read()
-headers = {"Authorization": "token " + token}
+try:
+    token = open(r'C:\secrets\github_token.txt', 'r').read()
+except FileNotFoundError:
+    print("Token not found.")
+    token = ""
 
+headers = {"Authorization": "token " + token}
 commits_between_dates = """
 {{
     repository(owner: "{0}", name:"{1}") {{
@@ -300,10 +303,6 @@ commits_between_dates = """
     }}
   }}
 }}
-
-
-
-
 """
 
 
@@ -368,26 +367,31 @@ bool_metadata = [
     'isSecurityPolicyEnabled', 'diskUsage', 'owner_isEmployee'
 ]
 
+
 def concat_ignore_index(df1, df2):
     return pd.concat([df1, df2.set_index(df1.index)], axis=1)
 
-def add_metadata(data_path,
+
+def add_metadata(timezones_path,
                  all_metadata,
                  cur_repo,
                  file):
 
     cur_metadata = all_metadata[file.replace("_", "/", 1).lower()]
-    bool_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=bool_metadata)
+    bool_df = pd.DataFrame(0, index=range(
+        cur_repo.shape[0]), columns=bool_metadata)
     cur_repo = concat_ignore_index(cur_repo, bool_df)
 
     cur_repo = handle_nonbool_metadata(cur_repo, cur_metadata)
-    cur_repo = handle_timezones(data_path, cur_repo, file)
+    cur_repo = handle_timezones(timezones_path, cur_repo, file)
     return cur_repo
 
 
 def handle_nonbool_metadata(cur_repo, cur_metadata):
-    all_langs_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=all_langs)
-    all_years_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[f"year_{x}" for x in range(2000,2023)])
+    all_langs_df = pd.DataFrame(0, index=range(
+        cur_repo.shape[0]), columns=all_langs)
+    all_years_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[
+                                f"year_{x}" for x in range(2000, 2023)])
     for key, value in cur_metadata.items():
         if key == "languages_edges":
             cur_repo = concat_ignore_index(cur_repo, all_langs_df)
@@ -417,9 +421,10 @@ def handle_nonbool_metadata(cur_repo, cur_metadata):
     return cur_repo
 
 
-def handle_timezones(data_path, cur_repo, file):
-    timezone_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[f"timezone_{x}" for x in range(-12, 15)])
-    with open(os.path.join(data_path, "timezones", file + ".json"), 'r') as f:
+def handle_timezones(timezones_path, cur_repo, file):
+    timezone_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[
+                               f"timezone_{x}" for x in range(-12, 15)])
+    with open(os.path.join(timezones_path, file + ".json"), 'r') as f:
         timezone = int(float(f.read()))
     cur_repo = concat_ignore_index(cur_repo, timezone_df)
 
@@ -427,10 +432,10 @@ def handle_timezones(data_path, cur_repo, file):
     return cur_repo
 
 
-
 class GeneralDataset(Dataset):
     def __init__(self) -> None:
         super().__init__()
+
 
 def set_seed(seed=42):
     random.seed(seed)

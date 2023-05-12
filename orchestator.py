@@ -56,24 +56,27 @@ def split_randomly(data):
     all_commits = []
     for repo in tqdm(data_keys):
         try:
-            all_commits.extend((repo, commit, 1) for commit in data[repo] if commit != "")
-            all_commits.extend((repo, commit, 0) for commit in get_benign_commits(repo, data[repo]))
+            all_commits.extend((repo, commit, 1)
+                               for commit in data[repo] if commit != "")
+            all_commits.extend((repo, commit, 0)
+                               for commit in get_benign_commits(repo, data[repo]))
         except Exception as e:
             print(f"Failed to get commits for repo {repo}")
             traceback.print_exc()
 
     random.shuffle(all_commits)
-    # split the data 
+    # split the data
     num_of_commits = len(all_commits)
     num_of_commits_training = int(num_of_commits * TRAIN_RATE)
     num_of_commits_validation = int(num_of_commits * VALIDATION_RATE)
 
     training_list = all_commits[:num_of_commits_training]
     validation_list = all_commits[num_of_commits_training:
-                                 num_of_commits_training + num_of_commits_validation]
-    testing_list = all_commits[num_of_commits_training + num_of_commits_validation:]
+                                  num_of_commits_training + num_of_commits_validation]
+    testing_list = all_commits[num_of_commits_training +
+                               num_of_commits_validation:]
 
-    for commit_list,commit_dict in zip((training_list, validation_list, testing_list),(training_dict, validation_dict, testing_dict)):
+    for commit_list, commit_dict in zip((training_list, validation_list, testing_list), (training_dict, validation_dict, testing_dict)):
         for commit in commit_list:
             repo, commit, label = commit
             if repo not in commit_dict:
