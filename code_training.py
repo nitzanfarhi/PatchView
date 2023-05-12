@@ -709,6 +709,8 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                         logger.warning(
                             f"eval_loss {float(results['eval_loss'])}")
                         logger.warning(
+                            f"train_loss {final_train_loss}")
+                        logger.warning(
                             f"eval_acc {round(results['eval_acc'],4)}")
 
                         # Save model checkpoint
