@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import git
 import traceback
@@ -6,84 +7,139 @@ from tqdm import tqdm
 SEED = 0x1337
 
 repo_commits_location = r"cache_data\repo_commits.json"
-repo_commit_code_location = r"D:\multisource\commits"
+COMMIT_REPO_PATH = r"D:\multisource\commits"
+MAXIMAL_FILE_SIZE = 100000
 
 
-TRAIN_RATE = 0.8
-VALIDATION_RATE = 0.1
-TEST_RATE = 0.1
+TRAIN_RATE = 1
+VALIDATION_RATE = 0
+TEST_RATE = 0
 
 
 def get_benign_commits(repo, security_commits):
-    num_of_patch_commits = len(security_commits)
     number_of_retrieved_commits = 0
-    repo = git.Repo(repo_commit_code_location + "\\" + repo.replace("/", "_"))
+    repo = git.Repo(COMMIT_REPO_PATH + "\\" + repo.replace("/", "_"))
     all_commit_list = list(repo.iter_commits())
     random.shuffle(all_commit_list)
     for commit in all_commit_list:
-        if number_of_retrieved_commits >= num_of_patch_commits:
-            break
         if commit not in security_commits:
             number_of_retrieved_commits += 1
-            yield commit.hexsha
+            yield commit
     return
 
+def add_code_data_to_dict(file):
+    cur_dict = {}
+    before = ""
+    after = ""
+    if file.content_before is not None:
+        try:
+            before = file.content_before.decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+    else:
+        before = ""
+
+    if file.content is not None:
+        try:
+            after = file.content.decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+    if "." not in file.filename:
+        return None
+    if len(after) > MAXIMAL_FILE_SIZE or len(before) > MAXIMAL_FILE_SIZE:
+        return None
+
+    filetype = file.filename.split(".")[-1].lower()
+    cur_dict["filetype"] = filetype
+    cur_dict["filename"] = file.filename
+    cur_dict["content"] = after
+    cur_dict["before_content"] = before
+    cur_dict["added"] = file.diff_parsed["added"]
+    cur_dict["deleted"] = file.diff_parsed["deleted"]
+    return cur_dict
+    
+def get_commit_from_repo(cur_repo, hash):
+    from pydriller import Repository
+    print(cur_repo,hash)
+    return next(Repository(cur_repo, single=hash).traverse_commits())
+
+def prepare_dict(repo, commit, label):
+    try:
+        commit = get_commit_from_repo(
+            os.path.join(COMMIT_REPO_PATH, repo.replace("/","_")), commit)
+        final_dict = {}
+        final_dict["name"] = commit.project_name
+        final_dict["hash"] = commit.hash
+        final_dict["files"] = []
+        final_dict["source"] = []
+        final_dict["label"] = label
+        final_dict["repo"] = repo
+        final_dict["message"] = commit.msg
+        if len(commit.modified_files) == 0:
+            raise CommitNotFound
+        for file in commit.modified_files:
+            cur_dict = add_code_data_to_dict(file)
+            if cur_dict is not None:
+                final_dict["files"].append(cur_dict)
+    except Exception:
+        raise CommitNotFound
+
+    return final_dict
 
 def main():
     random.seed(SEED)
-    should_split_by_repos = False
-    with open(r"cache_data\repo_commits.json", "r") as f:
+    with open(os.path.join("cache_data","orc","repo_commits.json"), "r") as f:
         data = json.load(f)
 
-    if should_split_by_repos:
-        training_dict, validation_dict, testing_dict = split_by_repos(data)
 
-    else:
-        training_dict, validation_dict, testing_dict = split_randomly(data)
+    training_dict = split_randomly(data)
 
-    with open("cache_data/orchestrator_train.json", "w") as f:
+
+    with open(os.path.join("cache_data","orc","orchestrator.json"), "w") as f:
         json.dump(training_dict, f, indent=4)
-    with open("cache_data/orchestrator_val.json", "w") as f:
-        json.dump(validation_dict, f, indent=4)
-    with open("cache_data/orchestrator_test.json", "w") as f:
-        json.dump(testing_dict, f, indent=4)
+
+class CommitNotFound(Exception):
+    """Raised when the commit is not found"""
+    pass
 
 
 def split_randomly(data):
-    training_dict, validation_dict, testing_dict = {}, {}, {}
+    commit_dict = {}
     data_keys = list(data)[:]
 
     all_commits = []
     for repo in tqdm(data_keys):
-        try:
-            all_commits.extend((repo, commit, 1)
-                               for commit in data[repo] if commit != "")
-            all_commits.extend((repo, commit, 0)
-                               for commit in get_benign_commits(repo, data[repo]))
-        except Exception as e:
-            print(f"Failed to get commits for repo {repo}")
-            traceback.print_exc()
+            print(repo)
+            positive_repo_counter = 0
+            negative_repo_counter = 0
+            for commit in data[repo]:
+                if commit == "":
+                    continue
+                try:
+                    commit_dict[commit] = prepare_dict(repo, commit, 1)
+                    positive_repo_counter +=1
+                except CommitNotFound:
+                    continue
+
+            commit = get_benign_commits(repo, data[repo])
+            while negative_repo_counter < positive_repo_counter:
+                try:    
+                    current_commit = next(commit)
+                except StopIteration:
+                    break
+                
+                commit_hash = current_commit.hexsha
+                try:
+                    commit_dict[commit_hash] = prepare_dict(repo, commit_hash,0)
+                    negative_repo_counter += 1
+                except CommitNotFound:
+                    continue
+
 
     random.shuffle(all_commits)
-    # split the data
-    num_of_commits = len(all_commits)
-    num_of_commits_training = int(num_of_commits * TRAIN_RATE)
-    num_of_commits_validation = int(num_of_commits * VALIDATION_RATE)
 
-    training_list = all_commits[:num_of_commits_training]
-    validation_list = all_commits[num_of_commits_training:
-                                  num_of_commits_training + num_of_commits_validation]
-    testing_list = all_commits[num_of_commits_training +
-                               num_of_commits_validation:]
 
-    for commit_list, commit_dict in zip((training_list, validation_list, testing_list), (training_dict, validation_dict, testing_dict)):
-        for commit in commit_list:
-            repo, commit, label = commit
-            if repo not in commit_dict:
-                commit_dict[repo] = []
-            commit_dict[repo].append((commit, label))
-
-    return training_dict, validation_dict, testing_dict
+    return commit_dict
 
 
 def split_by_repos(data):
