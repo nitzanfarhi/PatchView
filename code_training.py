@@ -5,7 +5,7 @@ import copy
 from torch.autograd import Variable
 
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, random_split
 from transformers import (get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
@@ -31,6 +31,8 @@ from torch import optim
 
 from events_models import Conv1DTune
 from language_models import RobertaClass
+from sklearn.model_selection import train_test_split
+
 
 cpu_cont = multiprocessing.cpu_count()
 
@@ -147,10 +149,13 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
         elif embedding_type == 'simple':
             added = [diff[1] for diff in file['added']]
             deleted = [diff[1] for diff in file['deleted']]
-            file_res = " ".join(added+deleted)
-            file_res = tokenizer(file_res, truncation=True,
-                                 padding='max_length', max_length=args.block_size)
-            res.append(file_res)
+            if not args.code_merge_file:
+                file_res = " ".join(added+deleted)
+                file_res = tokenizer(file_res, truncation=True,
+                                    padding='max_length', max_length=args.block_size)
+                res.append(file_res)
+            else:
+                res.append((added,deleted))
 
         elif embedding_type == 'simple_with_tokens':
             added = [ADD_TOKEN]+[diff[1]
@@ -177,6 +182,16 @@ def handle_commit(commit, tokenizer, args, language='all', embedding_type='conca
                                  padding='max_length', max_length=args.block_size)
             res.append(file_res)
             break
+        
+    if args.code_merge_file and res != []:
+        added_lst = []
+        deleted_lst = []
+        for added,deleted in res:
+            added_lst += added
+            deleted_lst += deleted
+        file_res = " ".join(added_lst+deleted_lst)
+        file_res = tokenizer(file_res, truncation=True, padding='max_length', max_length=args.block_size)
+        return [file_res]
 
     return res
 
@@ -190,7 +205,7 @@ def safe_makedir(path):
 
 class TextDataset(Dataset):
 
-    def __init__(self, tokenizer, args, phase):
+    def __init__(self, tokenizer, args, all_json, keys, phase):
         logger.warning(f"Loading dataset {phase} {args.language}")
         self.tokenizer = tokenizer
         self.args = args
@@ -209,7 +224,8 @@ class TextDataset(Dataset):
         self.negative_label_counter = 0
         self.commit_repos_path = args.commit_repos_path
 
-        self.load_commits_and_labels(args, phase)
+        # self.load_commits_and_labels(args, phase)
+        self.csv_list = keys
 
         if self.args.embedding_type == 'simple_with_tokens':
             logger.warning(
@@ -220,9 +236,9 @@ class TextDataset(Dataset):
             self.tokenizer.add_special_tokens({'additional_special_tokens': [
                                               REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]})
 
-        commit_list = self.get_commits()
-        logger.warning(f"Number of commits: {len(commit_list)}")
-        self.create_final_list(commit_list)
+        # commit_list = self.get_commits()
+        # logger.warning(f"Number of commits: {len(commit_list)}")
+        self.create_final_list(all_json, keys)
         logger.warning(f"Number of instances: {len(self.final_list_tensors)}")
         logger.warning(
             f"Number of positive instances: {sum(self.final_list_labels)}")
@@ -325,7 +341,7 @@ class TextDataset(Dataset):
 
         return final_dict
 
-    def create_final_list(self, commit_list):
+    def create_final_list(self, all_json, keys):
         if os.path.exists(self.final_cache_list) and self.cache:
             logger.warning("Get final list from cache")
             with open(self.final_cache_list, 'rb') as f:
@@ -336,9 +352,9 @@ class TextDataset(Dataset):
             return
 
         logger.warning("Create final list")
-        for commit in (pbar := tqdm(commit_list[:], leave=False)):
+        for commit in (pbar := tqdm(keys[:], leave=False)):
             token_arr_lst = handle_commit(
-                commit,
+                all_json[commit],
                 self.tokenizer,
                 self.args,
                 language=self.language,
@@ -349,16 +365,16 @@ class TextDataset(Dataset):
                     self.final_list_tensors.append(
                         torch.tensor(token_arr['input_ids']))
                     self.final_list_labels.append(
-                        torch.tensor(int(commit['label'])))
-                    self.final_commit_info.append(commit)
+                        torch.tensor(int(all_json[commit]['label'])))
+                    self.final_commit_info.append(all_json[commit])
             # print(len(token_arr_lst))
-            if int(commit['label']) == 1:
+            if int(all_json[commit]['label']) == 1:
                 self.positive_label_counter += len(token_arr_lst)
             else:
                 self.negative_label_counter += len(token_arr_lst)
 
             pbar.set_description(
-                f"Current Project: {commit['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
+                f"Current Project: {all_json[commit]['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
 
         if self.args.balance:
             self.balance_data()
@@ -488,58 +504,11 @@ def parse_args():
                         default="Text", help="source model")
     parser.add_argument("--balance", action="store_true",
                         help="balance data to keep positives and negatives the same")
-
+    parser.add_argument("--event_window_size", type=int, default=10, help="event window size")
+    parser.add_argument("--code_merge_file", action="store_true", help="code merge file")
+    parser.add_argument("--folds", type=int, default=5, help="folds")
     return parser.parse_args()
 
-
-# def main():
-#     args = parse_args()
-#     print("Loading model")
-#     from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
-#     from transformers import pipeline
-#     # model = RobertaForSequenceClassification.from_pretrained("microsoft/codebert-base", num_labels=2)
-#     # tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
-
-#     model = AutoModelForSequenceClassification.from_pretrained(
-#         'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
-#     tokenizer = AutoTokenizer.from_pretrained(
-#         'mrm8488/codebert-base-finetuned-detect-insecure-code', cache_dir=args.cache_dir)
-
-#     import numpy as np
-#     from datasets import load_metric
-#     import wandb
-#     wandb.init(project="msd",
-#                 tags = [args.embedding_type, args.language],
-#                 config = args
-#                 )
-
-#     load_accuracy = load_metric("accuracy")
-
-#     def compute_metrics(eval_pred):
-#         predictions, labels = eval_pred
-#         predictions = np.argmax(predictions, axis=1)
-#         return load_accuracy.compute(predictions=predictions, references=labels)
-
-#     from transformers import TrainingArguments, Trainer
-
-
-#     train_dataset = TextDataset(tokenizer, args, 'train')
-#     eval_dataset = TextDataset(tokenizer, args, 'val')
-
-#     if args.embedding_type == "simple_with_tokens":
-#         model.resize_token_embeddings(len(tokenizer))
-
-
-#     trng_args = TrainingArguments(output_dir=args.embedding_type,
-#                                   evaluation_strategy="epoch",
-#                                   num_train_epochs=args.epochs,
-#                                   resume_from_checkpoint=True,
-#                                   learning_rate=args.learning_rate,
-#                                   report_to="wandb")
-#     trainer = Trainer(model=model, args=trng_args, train_dataset=train_dataset,
-#                       eval_dataset=eval_dataset, compute_metrics=compute_metrics)
-#     trainer.train()
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -603,7 +572,7 @@ def evaluate(args, model, tokenizer, eval_dataset=None):
     return result
 
 
-def train(args, train_dataset, model, tokenizer, eval_dataset=None):
+def train(args, train_dataset, model, tokenizer, fold, eval_dataset=None):
     """ Train the model """
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
@@ -729,13 +698,14 @@ def train(args, train_dataset, model, tokenizer, eval_dataset=None):
                         model_to_save = model.module if hasattr(
                             model, 'module') else model
                         output_dir = os.path.join(
-                            output_dir, '{}'.format('model.bin'))
+                            output_dir, '{}'.format(f'model_{fold}.bin'))
                         torch.save(model_to_save.state_dict(), output_dir)
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
 
-                    wandb.log({"train_loss": final_train_loss, "global_step": global_step,
-                              "epoch": idx, "eval_loss": results['eval_loss'], "eval_acc": best_acc})
+                    wandb.log({ f"Fold {fold} Epoch" : idx, "train_loss": final_train_loss, "global_step": global_step, "eval_loss": results['eval_loss'], "eval_acc": best_acc})
+
+    return best_acc
 
 
 def test(args, model, tokenizer, eval_dataset):
@@ -891,49 +861,61 @@ def main(args):
         # End of barrier to make sure only the first process in distributed training download model & vocab
         torch.distributed.barrier()
 
-    logger.info("Training/evaluation parameters %s", args)
-    if args.source_model == "Text":
-        args.Dataset = TextDataset
-        train_dataset = args.Dataset(tokenizer, args, "train")
-        eval_dataset = args.Dataset(tokenizer, args, 'val')
-        test_dataset = args.Dataset(tokenizer, args, 'test')
-        logger.warning(f"Tokenizer size after : {len(tokenizer)}")
-        model.encoder.resize_token_embeddings(len(tokenizer))
+    logger.warning("Training/evaluation parameters %s", args)
+    with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
+        mall = json.load(f)
 
-    elif args.source_model == "Events":
-        from events_datasets import EventsDataset
-        args.Dataset = EventsDataset
-        train_dataset = args.Dataset(args, "train")
-        eval_dataset = args.Dataset(args, 'val')
-        test_dataset = args.Dataset(args, 'test')
+    best_acc = 0
+    fold_best_acc = 0
+    for fold in range(args.folds):
+        logger.warning(f"Fold {fold}")
 
-        xshape1 = train_dataset[0][0].shape[0]
-        xshape2 = train_dataset[0][0].shape[1]
-        events_config = {'l1': 64, 'l2': 32, 'l3': 16,
-                         'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
-                         'optimizer': optim.Adam}
-        model = Conv1DTune(args,
-                           xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
-        model = model.to(args.device)
+        if args.source_model == "Text":
+            args.Dataset = TextDataset
+            dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
+            model.encoder.resize_token_embeddings(len(tokenizer))
 
-    else:
-        raise NotImplementedError
+        elif args.source_model == "Events":
+            from events_datasets import EventsDataset
+            args.Dataset = EventsDataset
+            dataset = EventsDataset(args, mall, mall.keys(), "train")
 
-    # Training
-    if args.do_train:
-        if args.local_rank not in [-1, 0]:
-            # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
-            torch.distributed.barrier()
+            xshape1 = dataset[0][0].shape[0]
+            xshape2 = dataset[0][0].shape[1]
+            events_config = {'l1': 64, 'l2': 32, 'l3': 16,
+                            'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
+                            'optimizer': optim.Adam}
+            model = Conv1DTune(args,
+                            xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
+            model = model.to(args.device)
 
-        if args.local_rank == 0:
-            torch.distributed.barrier()
+        else:
+            raise NotImplementedError
+        
+        
+        TRAIN_SIZE = int(len(dataset)*0.8)
+        VAL_SIZE = len(dataset) - TRAIN_SIZE
 
-        train(args, train_dataset, model, tokenizer, eval_dataset=eval_dataset)
+        train_dataset, eval_dataset = random_split(dataset, [TRAIN_SIZE,VAL_SIZE])
+        test_dataset = eval_dataset
+        # Training
+        if args.do_train:
+            if args.local_rank not in [-1, 0]:
+                # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
+                torch.distributed.barrier()
+
+            if args.local_rank == 0:
+                torch.distributed.barrier()
+
+            acc = train(args, train_dataset, model, tokenizer, fold, eval_dataset=eval_dataset)
+            if acc > best_acc:
+                best_acc = acc
+                fold_best_acc = fold
 
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
-        checkpoint_prefix = 'checkpoint-best-acc/model.bin'
+        checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
         output_dir = os.path.join(
             args.output_dir, '{}'.format(checkpoint_prefix))
         model.load_state_dict(torch.load(output_dir))
@@ -944,7 +926,7 @@ def main(args):
         logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
 
     if args.do_test and args.local_rank in [-1, 0]:
-        checkpoint_prefix = 'checkpoint-best-acc/model.bin'
+        checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
         output_dir = os.path.join(
             args.output_dir, '{}'.format(checkpoint_prefix))
         model.load_state_dict(torch.load(output_dir))

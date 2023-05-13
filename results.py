@@ -79,12 +79,12 @@ def show_results(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Show results from wandb")
-    parser.add_argument("--code_artifact", type=str, default="",
+    parser.add_argument("--code_artifact", type=str, default="nitzanfarhi/MSD2/run-x6yu69pm-test_table:v0",
                         help="Gather tables from wandb artifact")
     parser.add_argument("--message_artifact", type=str,
-                        default="", help="Gather tables from wandb artifact")
+                        default="nitzanfarhi/MSD2/run-5n24o8xr-test_table:v0", help="Gather tables from wandb artifact")
     parser.add_argument("--event_artifact", type=str,
-                        default="", help="Gather tables from wandb artifact")
+                        default="nitzanfarhi/MSD2/run-xqc0dddj-test_table:v0", help="Gather tables from wandb artifact")
     parser.add_argument("--aggr", type=str, default="avg",
                         help="Aggregation function to use")
     parser.add_argument("--local_dir", type=str, default="",
