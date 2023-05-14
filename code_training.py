@@ -5,7 +5,7 @@ import copy
 from torch.autograd import Variable
 
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, random_split
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler, random_split, SubsetRandomSampler
 from transformers import (get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
@@ -31,7 +31,7 @@ from torch import optim
 
 from events_models import Conv1DTune
 from language_models import RobertaClass
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 
 
 cpu_cont = multiprocessing.cpu_count()
@@ -519,7 +519,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 
-def evaluate(args, model, tokenizer, eval_dataset=None):
+def evaluate(args, model, tokenizer, dataset, eval_idx=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
 
@@ -528,9 +528,8 @@ def evaluate(args, model, tokenizer, eval_dataset=None):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
-    eval_sampler = SequentialSampler(
-        eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
-    eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler,
+    eval_sampler = SubsetRandomSampler(eval_idx)
+    eval_dataloader = DataLoader(dataset, sampler=eval_sampler,
                                  batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
 
     # multi-gpu evaluate
@@ -539,7 +538,7 @@ def evaluate(args, model, tokenizer, eval_dataset=None):
 
     # Eval!
     logger.info("***** Running evaluation *****")
-    logger.info("  Num examples = %d", len(eval_dataset))
+    logger.info("  Num examples = %d", len(eval_dataloader))
     logger.info("  Batch size = %d", args.eval_batch_size)
     eval_loss = 0.0
     nb_eval_steps = 0
@@ -572,13 +571,11 @@ def evaluate(args, model, tokenizer, eval_dataset=None):
     return result
 
 
-def train(args, train_dataset, model, tokenizer, fold, eval_dataset=None):
+def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
     """ Train the model """
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    train_sampler = RandomSampler(
-        train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
-
+    train_sampler = SubsetRandomSampler(idx)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
                                   batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
 
@@ -674,7 +671,7 @@ def train(args, train_dataset, model, tokenizer, fold, eval_dataset=None):
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
                         results = evaluate(
-                            args, model, tokenizer, eval_dataset=eval_dataset)
+                            args, model, tokenizer, train_dataset, eval_idx=eval_idx)
                         logger.warning(
                             f"eval_loss {float(results['eval_loss'])}")
                         logger.warning(
@@ -865,39 +862,36 @@ def main(args):
     with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
 
+    if args.source_model == "Text":
+        args.Dataset = TextDataset
+        dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
+        model.encoder.resize_token_embeddings(len(tokenizer))
+
+    elif args.source_model == "Events":
+        from events_datasets import EventsDataset
+        args.Dataset = EventsDataset
+        dataset = EventsDataset(args, mall, mall.keys(), "train")
+
+        xshape1 = dataset[0][0].shape[0]
+        xshape2 = dataset[0][0].shape[1]
+        events_config = {'l1': 64, 'l2': 32, 'l3': 16,
+                        'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
+                        'optimizer': optim.Adam}
+        model = Conv1DTune(args,
+                        xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
+        model = model.to(args.device)
+
+    else:
+        raise NotImplementedError
+    
     best_acc = 0
     fold_best_acc = 0
-    for fold in range(args.folds):
-        logger.warning(f"Fold {fold}")
 
-        if args.source_model == "Text":
-            args.Dataset = TextDataset
-            dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
-            model.encoder.resize_token_embeddings(len(tokenizer))
+    splits=KFold(n_splits=args.folds,shuffle=True,random_state=args.seed)
 
-        elif args.source_model == "Events":
-            from events_datasets import EventsDataset
-            args.Dataset = EventsDataset
-            dataset = EventsDataset(args, mall, mall.keys(), "train")
+    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+        print('Fold {}'.format(fold + 1))
 
-            xshape1 = dataset[0][0].shape[0]
-            xshape2 = dataset[0][0].shape[1]
-            events_config = {'l1': 64, 'l2': 32, 'l3': 16,
-                            'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
-                            'optimizer': optim.Adam}
-            model = Conv1DTune(args,
-                            xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
-            model = model.to(args.device)
-
-        else:
-            raise NotImplementedError
-        
-        
-        TRAIN_SIZE = int(len(dataset)*0.8)
-        VAL_SIZE = len(dataset) - TRAIN_SIZE
-
-        train_dataset, eval_dataset = random_split(dataset, [TRAIN_SIZE,VAL_SIZE])
-        test_dataset = eval_dataset
         # Training
         if args.do_train:
             if args.local_rank not in [-1, 0]:
@@ -907,34 +901,37 @@ def main(args):
             if args.local_rank == 0:
                 torch.distributed.barrier()
 
-            acc = train(args, train_dataset, model, tokenizer, fold, eval_dataset=eval_dataset)
+            acc = train(args, dataset, model, tokenizer, fold, train_idx, eval_idx=val_idx)
+
             if acc > best_acc:
                 best_acc = acc
                 fold_best_acc = fold
 
-    # Evaluation
-    results = {}
-    if args.do_eval and args.local_rank in [-1, 0]:
-        checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
-        output_dir = os.path.join(
-            args.output_dir, '{}'.format(checkpoint_prefix))
-        model.load_state_dict(torch.load(output_dir))
-        model.to(args.device)
-        results = evaluate(args, model, tokenizer, eval_dataset=eval_dataset)
-        logger.info("***** Eval results *****")
-        logger.warning(f"eval_loss {float(results['eval_loss'])}")
-        logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
+            print(f"Current acc: {acc}, best acc: {best_acc}, best fold: {fold_best_acc}")
 
-    if args.do_test and args.local_rank in [-1, 0]:
-        checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
-        output_dir = os.path.join(
-            args.output_dir, '{}'.format(checkpoint_prefix))
-        model.load_state_dict(torch.load(output_dir))
-        model.to(args.device)
-        test(args, model, tokenizer, test_dataset)
-        wandb.log_artifact(output_dir, type='model')
+    # # Evaluation
+    # results = {}
+    # if args.do_eval and args.local_rank in [-1, 0]:
+    #     checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
+    #     output_dir = os.path.join(
+    #         args.output_dir, '{}'.format(checkpoint_prefix))
+    #     model.load_state_dict(torch.load(output_dir))
+    #     model.to(args.device)
+    #     results = evaluate(args, model, tokenizer, eval_dataset=eval_idx)
+    #     logger.info("***** Eval results *****")
+    #     logger.warning(f"eval_loss {float(results['eval_loss'])}")
+    #     logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
 
-    return results
+    # if args.do_test and args.local_rank in [-1, 0]:
+    #     checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
+    #     output_dir = os.path.join(
+    #         args.output_dir, '{}'.format(checkpoint_prefix))
+    #     model.load_state_dict(torch.load(output_dir))
+    #     model.to(args.device)
+    #     test(args, model, tokenizer, test_dataset)
+    #     wandb.log_artifact(output_dir, type='model')
+
+    return {}
 
 
 def initalize_wandb(args):
