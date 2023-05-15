@@ -32,7 +32,8 @@ from torch import optim
 from events_models import Conv1DTune
 from language_models import RobertaClass
 from sklearn.model_selection import KFold, train_test_split
-
+import os
+os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
 
 cpu_cont = multiprocessing.cpu_count()
 
@@ -700,7 +701,7 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
 
-                    wandb.log({ f"Fold {fold} Epoch" : idx, "train_loss": final_train_loss, "global_step": global_step, "eval_loss": results['eval_loss'], "eval_acc": best_acc})
+                    wandb.log({ f"Fold {fold} Epoch" : idx, f"{fold}_train_loss": final_train_loss, "global_step": global_step, f"{fold}_eval_loss": results['eval_loss'], f"{fold}_eval_acc": best_acc})
 
     return best_acc
 
@@ -908,6 +909,9 @@ def main(args):
                 fold_best_acc = fold
 
             print(f"Current acc: {acc}, best acc: {best_acc}, best fold: {fold_best_acc}")
+            for layer in model.children():
+                if hasattr(layer, 'reset_parameters'):
+                    layer.reset_parameters()
 
     # # Evaluation
     # results = {}
