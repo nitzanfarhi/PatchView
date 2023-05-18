@@ -88,15 +88,32 @@ def prepare_dict(repo, commit, label):
 
 def main():
     random.seed(SEED)
-    with open(os.path.join("cache_data","orc","repo_commits.json"), "r") as f:
-        data = json.load(f)
 
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json","r") as mfile:
+        train_details = json.load(mfile)
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json","r") as mfile:
+        val_details = json.load(mfile)
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json","r") as mfile:
+        test_details = json.load(mfile)
+    mall = {}
+    for row in train_details:
+        mall[row[3]] = {"label":row[2],"repo":row[0]}
+    for row in val_details:
+        mall[row[3]] = {"label":row[2],"repo":row[0]}
+    for row in test_details:
+        mall[row[3]] = {"label":row[2],"repo":row[0]}
 
-    training_dict = split_randomly(data)
-
+    new_mall = {}
+    for a,b in mall.items():
+        if a == "":
+            commit = get_benign_commits(b['repo'],[])
+            commit_hash = next(commit).hexsha
+            new_mall[commit_hash] = {"label":0,"repo":b['repo']}
+        else:
+            new_mall[a] = b
 
     with open(os.path.join("cache_data","orc","orchestrator.json"), "w") as f:
-        json.dump(training_dict, f, indent=4)
+        json.dump(new_mall, f, indent=4)
 
 class CommitNotFound(Exception):
     """Raised when the commit is not found"""
@@ -119,6 +136,7 @@ def split_randomly(data):
                     commit_dict[commit] = prepare_dict(repo, commit, 1)
                     positive_repo_counter +=1
                 except CommitNotFound:
+                    print(commit)
                     continue
 
             commit = get_benign_commits(repo, data[repo])

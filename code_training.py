@@ -29,7 +29,7 @@ import wandb
 import logging
 from torch import optim
 
-from events_models import Conv1DTune
+from events_models import LSTM, Conv1DTune
 from language_models import RobertaClass
 from sklearn.model_selection import KFold, train_test_split
 import os
@@ -63,6 +63,23 @@ REP_AFTER_TOKEN = '[RAT]'
 ADD_TOKEN = '[ADD]'
 DELETE_TOKEN = '[DEL]'
 
+
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = np.inf
+
+    def early_stop(self, validation_loss):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss > (self.min_validation_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
 
 def get_commit_from_repo(cur_repo, hash):
     from pydriller import Repository
@@ -377,7 +394,7 @@ class TextDataset(Dataset):
             pbar.set_description(
                 f"Current Project: {all_json[commit]['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
 
-        if self.args.balance:
+        if not self.args.dont_balance:
             self.balance_data()
 
         with open(self.final_cache_list, 'wb') as f:
@@ -427,7 +444,7 @@ def parse_args():
     parser.add_argument('--fp16_opt_level', type=str, default='O1',
                         help="For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
                              "See details at https://nvidia.github.io/apex/amp.html")
-    parser.add_argument("--model_type", default="roberta", type=str,
+    parser.add_argument("--model_type", default="default", type=str,
                         help="The model architecture to be fine-tuned.")
     parser.add_argument("--model_name_or_path", default="microsoft/codebert-base", type=str,
                         help="The model checkpoint for weights initialization.")
@@ -503,11 +520,12 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.1, help="dropout")
     parser.add_argument("--source_model", type=str,
                         default="Text", help="source model")
-    parser.add_argument("--balance", action="store_true",
+    parser.add_argument("--dont_balance", action="store_true",
                         help="balance data to keep positives and negatives the same")
     parser.add_argument("--event_window_size", type=int, default=10, help="event window size")
     parser.add_argument("--code_merge_file", action="store_true", help="code merge file")
     parser.add_argument("--folds", type=int, default=5, help="folds")
+    parser.add_argument("--patience", type=int, default=30, help="patience")
     return parser.parse_args()
 
 
@@ -520,7 +538,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 
-def evaluate(args, model, tokenizer, dataset, eval_idx=None):
+def evaluate(args, model, dataset, eval_idx=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
 
@@ -557,14 +575,20 @@ def evaluate(args, model, tokenizer, dataset, eval_idx=None):
         nb_eval_steps += 1
     logits = np.concatenate(logits, 0)
     labels = np.concatenate(labels, 0)
-    preds = logits[:, 0] > 0.5
-    eval_acc = np.mean(labels == preds)
+    best_acc = 0
+    best_threshold = 0
     eval_loss = eval_loss / nb_eval_steps
     perplexity = torch.tensor(eval_loss)
-
+    for i in range(100):
+        preds = logits[:, 0] > i/100
+        eval_acc = np.mean(labels == preds)
+        if eval_acc > best_acc:
+            best_acc = eval_acc
+            best_threshold = i/100
+    logging.info("best threshold: {}".format(best_threshold))
     result = {
         "eval_loss": float(perplexity),
-        "eval_acc": round(eval_acc, 4),
+        "eval_acc": round(best_acc, 4),
         "labels": labels,
         "preds": preds,
 
@@ -572,19 +596,35 @@ def evaluate(args, model, tokenizer, dataset, eval_idx=None):
     return result
 
 
-def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
+def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     """ Train the model """
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = SubsetRandomSampler(idx)
+
+    # print train_dataset label percentages
+    negatives = 0
+    positives = 0
+  
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
                                   batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
-
-    args.max_steps = args.epoch*len(train_dataloader)
+    
+    for a in train_dataloader:
+        for b in a[1]:
+            if b == 0:
+                negatives += 1
+            elif b == 1:
+                positives += 1
+            else:
+                raise ValueError("label error")
+    logger.warning("dataset balance percentage: {}".format(positives/(positives+negatives)))
+    run.summary[f"balance_{fold}"] = positives/(positives+negatives) 
+    
+    args.max_steps = args.epochs*len(train_dataloader)
     args.save_steps = len(train_dataloader)
     args.warmup_steps = len(train_dataloader)
     args.logging_steps = len(train_dataloader)
-    args.num_train_epochs = args.epoch
+    args.num_train_epochs = args.epochs
     model.to(args.device)
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
@@ -612,7 +652,7 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
     # Train!
     logger.info("***** Running training *****")
     logger.info("  Num GPUS = %d", args.n_gpu)
-    logger.info("  Num examples = %d", len(train_dataset))
+    logger.info("  Num examples = %d , evaluation = %d", len(idx),len(eval_idx))
     logger.info("  Num Epochs = %d", args.num_train_epochs)
     logger.info("  Instantaneous batch size per GPU = %d",
                 args.per_gpu_train_batch_size)
@@ -628,6 +668,8 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
     best_acc = 0.0
 
     model.zero_grad()
+
+    early_stopper = EarlyStopper(patience=args.patience, min_delta=0)
 
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
         bar = tqdm(train_dataloader, total=len(train_dataloader))
@@ -672,7 +714,7 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
                         results = evaluate(
-                            args, model, tokenizer, train_dataset, eval_idx=eval_idx)
+                            args, model, train_dataset, eval_idx=eval_idx)
                         logger.warning(
                             f"eval_loss {float(results['eval_loss'])}")
                         logger.warning(
@@ -681,6 +723,10 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
                             f"eval_acc {round(results['eval_acc'],4)}")
 
                         # Save model checkpoint
+
+                    if early_stopper.early_stop(results['eval_acc']):         
+                        logger.info("Early stopping")    
+                        return best_acc
 
                     if results['eval_acc'] > best_acc:
                         best_acc = results['eval_acc']
@@ -701,19 +747,19 @@ def train(args, train_dataset, model, tokenizer, fold, idx, eval_idx=None):
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
 
-                    wandb.log({ f"Fold {fold} Epoch" : idx, f"{fold}_train_loss": final_train_loss, "global_step": global_step, f"{fold}_eval_loss": results['eval_loss'], f"{fold}_eval_acc": best_acc})
+                    wandb.log({ f"epoch" : idx, f"train_loss": final_train_loss, "global_step": global_step, f"eval_loss": results['eval_loss'], f"eval_acc": best_acc})
 
     return best_acc
 
 
-def test(args, model, tokenizer, eval_dataset):
+def test(args, model, dataset, idx, fold=0):
+
+    train_sampler = torch.utils.data.Subset(dataset, idx)
+    eval_dataloader = DataLoader(train_sampler, batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
-    eval_sampler = SequentialSampler(
-        eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
-    eval_dataloader = DataLoader(
-        eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
+
 
     # multi-gpu evaluate
     if args.n_gpu > 1:
@@ -721,7 +767,7 @@ def test(args, model, tokenizer, eval_dataset):
 
     # Eval!
     logger.info("***** Running Test *****")
-    logger.info("  Num examples = %d", len(eval_dataset))
+    logger.info("  Num examples = %d", len(idx))
     logger.info("  Batch size = %d", args.eval_batch_size)
     eval_loss = 0.0
     nb_eval_steps = 0
@@ -738,15 +784,28 @@ def test(args, model, tokenizer, eval_dataset):
 
     logits = np.concatenate(logits, 0)
     labels = np.concatenate(labels, 0)
-    preds = logits[:, 0] > 0.5
+
+    best_acc = 0
+    best_threshold = 0
+    for i in range(100):
+        preds = logits[:, 0] > i/100
+        eval_acc = np.mean(labels == preds)
+        if eval_acc > best_acc:
+            best_acc = eval_acc
+            best_threshold = i/100
+
+    preds = logits[:, 0] > best_threshold
 
     res = []
-    for example, pred in zip(eval_dataset.final_commit_info, preds):
+    infos = [dataset.final_commit_info[x] for x in idx]
+    for example, pred in zip(infos, preds):
         res.append([example['name'], example['hash'], pred, example['label']])
 
     table = wandb.Table(
         columns=["Name", "Hash", "Prediction", "Actual"], data=res)
-    wandb.log({"test_table": table})
+    wandb.log({f"test_table_{fold}": table})
+    wandb.run.summary[f"test_acc_{fold}"] = best_acc
+    wandb.run.summary[f"test_threshold_{fold}"] = best_threshold
 
 
 class Model(nn.Module):
@@ -772,17 +831,6 @@ class Model(nn.Module):
 
 
 def main(args):
-    if args.hyperparameter:
-        wandb.init(config=args, tags=[args.embedding_type, args.language])
-
-        args.learning_rate = wandb.config.lr
-        args.train_batch_size = wandb.config.batch_size
-        args.eval_batch_size = wandb.config.batch_size
-        args.epochs = wandb.config.epochs
-        args.weight_decay = wandb.config.weight_decay
-        args.max_grad_norm = wandb.config.max_grad_norm
-
-    args.epoch = args.epochs
     device = torch.device("cuda" if torch.cuda.is_available()
                           and not args.no_cuda else "cpu")
     args.n_gpu = torch.cuda.device_count()
@@ -806,25 +854,100 @@ def main(args):
     args.start_epoch = 0
     args.start_step = 0
     args.output_dir = args.cache_dir
-    checkpoint_last = os.path.join(args.output_dir, 'checkpoint-last')
-    if os.path.exists(checkpoint_last) and os.listdir(checkpoint_last):
-        args.model_name_or_path = os.path.join(
-            checkpoint_last, 'pytorch_model.bin')
-        args.config_name = os.path.join(checkpoint_last, 'config.json')
-        idx_file = os.path.join(checkpoint_last, 'idx_file.txt')
-        with open(idx_file, encoding='utf-8') as idxf:
-            args.start_epoch = int(idxf.readlines()[0].strip()) + 1
-
-        step_file = os.path.join(checkpoint_last, 'step_file.txt')
-        if os.path.exists(step_file):
-            with open(step_file, encoding='utf-8') as stepf:
-                args.start_step = int(stepf.readlines()[0].strip())
-
-        logger.info("reload model from {}, resume from {} epoch".format(
-            checkpoint_last, args.start_epoch))
 
     if args.cache_dir:
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
+
+    if args.local_rank == 0:
+        # End of barrier to make sure only the first process in distributed training download model & vocab
+        torch.distributed.barrier()
+
+    logger.warning("Training/evaluation parameters %s", args)
+    # with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
+    #     mall = json.load(f)
+
+    import pickle
+    import json
+    import pandas
+    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json","r") as mfile:
+    #     train_details = json.load(mfile)
+    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json","r") as mfile:
+    #     val_details = json.load(mfile)
+    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json","r") as mfile:
+    #     test_details = json.load(mfile)
+    # mall = {}
+    # for row in train_details:
+    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
+    # for row in val_details:
+    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
+    # for row in test_details:
+    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
+
+    with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
+        mall = json.load(f)
+
+
+    if args.source_model == "Code" or args.source_model == "Message":
+        tokenizer, model = get_text_model_and_tokenizer(args)
+        dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
+        model.encoder.resize_token_embeddings(len(tokenizer))
+
+    elif args.source_model == "Events":
+        from events_datasets import EventsDataset
+        dataset = EventsDataset(args, mall, mall.keys(), "train")
+        model = get_events_model(args, dataset)
+
+    elif args.source_model == "Multi":
+        from events_datasets import EventsDataset
+
+        raise NotImplementedError
+    
+    best_acc = 0
+    fold_best_acc = 0
+    best_val_idx = None
+    best_model = None
+
+    splits=KFold(n_splits=args.folds,shuffle=False) #,random_state=args.seed)
+
+    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+        print('Fold {}'.format(fold + 1))
+        with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args, name = f"{args.source_model}_{fold}") as run:
+            run.define_metric("epoch")
+            train(args, dataset, model, fold, train_idx, run, eval_idx=val_idx)
+            test(args, model, dataset, val_idx, fold=fold)
+
+            model_restart(model, args)
+
+
+
+    return {}
+
+def model_restart(model, args):
+    assert args.source_model == "Events"
+    for layer in model.children():
+        if hasattr(layer, 'reset_parameters'):
+            layer.reset_parameters()
+
+def get_events_model(args, dataset):
+    xshape1 = dataset[0][0].shape[0]
+    xshape2 = dataset[0][0].shape[1]
+    events_config = {'l1': 64, 'l2': 64, 'l3': 64, 'l4': 64}
+    if args.model_type == "conv1d" or args.model_type == "default":
+        model = Conv1DTune(args,
+                            xshape1, xshape2, l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
+    elif args.model_type == "lstm":
+        logging.warning(f"shapes are {xshape1}, {xshape2}")
+        model = LSTM(args,xshape1, xshape2)
+    elif args.model_type == "gru":
+        raise NotImplementedError
+    else:
+        raise NotImplementedError
+    
+    
+    model = model.to(args.device)
+    return model
+
+def get_text_model_and_tokenizer(args):
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                           cache_dir=args.model_cache_dir if args.model_cache_dir else None, num_labels=2)
@@ -854,128 +977,10 @@ def main(args):
         logger.warning("Using RobertaClass")
     else:
         model = Model(model, config, tokenizer, args)
+    return tokenizer,model
 
-    if args.local_rank == 0:
-        # End of barrier to make sure only the first process in distributed training download model & vocab
-        torch.distributed.barrier()
-
-    logger.warning("Training/evaluation parameters %s", args)
-    with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
-        mall = json.load(f)
-
-    if args.source_model == "Text":
-        args.Dataset = TextDataset
-        dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
-        model.encoder.resize_token_embeddings(len(tokenizer))
-
-    elif args.source_model == "Events":
-        from events_datasets import EventsDataset
-        args.Dataset = EventsDataset
-        dataset = EventsDataset(args, mall, mall.keys(), "train")
-
-        xshape1 = dataset[0][0].shape[0]
-        xshape2 = dataset[0][0].shape[1]
-        events_config = {'l1': 64, 'l2': 32, 'l3': 16,
-                        'l4': 128, 'lr': 0.01, 'dropout': 0.2, 'batch_size': 512,
-                        'optimizer': optim.Adam}
-        model = Conv1DTune(args,
-                        xshape1, xshape2,  l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
-        model = model.to(args.device)
-
-    else:
-        raise NotImplementedError
-    
-    best_acc = 0
-    fold_best_acc = 0
-
-    splits=KFold(n_splits=args.folds,shuffle=True,random_state=args.seed)
-
-    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
-        print('Fold {}'.format(fold + 1))
-
-        # Training
-        if args.do_train:
-            if args.local_rank not in [-1, 0]:
-                # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
-                torch.distributed.barrier()
-
-            if args.local_rank == 0:
-                torch.distributed.barrier()
-
-            acc = train(args, dataset, model, tokenizer, fold, train_idx, eval_idx=val_idx)
-
-            if acc > best_acc:
-                best_acc = acc
-                fold_best_acc = fold
-
-            print(f"Current acc: {acc}, best acc: {best_acc}, best fold: {fold_best_acc}")
-            for layer in model.children():
-                if hasattr(layer, 'reset_parameters'):
-                    layer.reset_parameters()
-
-    # # Evaluation
-    # results = {}
-    # if args.do_eval and args.local_rank in [-1, 0]:
-    #     checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
-    #     output_dir = os.path.join(
-    #         args.output_dir, '{}'.format(checkpoint_prefix))
-    #     model.load_state_dict(torch.load(output_dir))
-    #     model.to(args.device)
-    #     results = evaluate(args, model, tokenizer, eval_dataset=eval_idx)
-    #     logger.info("***** Eval results *****")
-    #     logger.warning(f"eval_loss {float(results['eval_loss'])}")
-    #     logger.warning(f"eval_acc {round(results['eval_acc'],4)}")
-
-    # if args.do_test and args.local_rank in [-1, 0]:
-    #     checkpoint_prefix = 'checkpoint-best-acc/model_{fold}.bin'
-    #     output_dir = os.path.join(
-    #         args.output_dir, '{}'.format(checkpoint_prefix))
-    #     model.load_state_dict(torch.load(output_dir))
-    #     model.to(args.device)
-    #     test(args, model, tokenizer, test_dataset)
-    #     wandb.log_artifact(output_dir, type='model')
-
-    return {}
-
-
-def initalize_wandb(args):
-    import wandb
-    # Define sweep config
-    sweep_configuration = {
-        'method': 'random',
-        'name': 'sweep',
-        'metric': {'goal': 'minimize', 'name': 'eval_loss'},
-        'parameters':
-        {
-            'batch_size': {'values': [16, 32, 64]},
-            'epochs': {'values': [5, 10, 15, 20]},
-            'lr': {'max': 0.1, 'min': 1e-5},
-            'weight_decay': {'max': 0.1, 'min': 1e-5},
-            'max_grad_norm': {'max': 5, 'min': 0},
-        }
-    }
-
-    from functools import partial
-    if args.hyperparameter:
-        sweep_id = wandb.sweep(
-            sweep=sweep_configuration,
-            project=PROJECT_NAME
-        )
-        wandb.agent(sweep_id, function=partial(main, args), count=20)
-
-    else:
-        wandb.init(project=PROJECT_NAME,
-                   # name = args.model_type + '-' + args.embedding_type + '-' + args.language,
-                   tags=[args.embedding_type, args.language],
-                   config=args
-                   )
 
 
 if __name__ == "__main__":
-
     args = parse_args()
-
-    initalize_wandb(args)
-
-    if not args.hyperparameter:
-        main(args)
+    main(args)
