@@ -309,7 +309,7 @@ def add_type_one_hot_encoding(df):
     """
     :param df: dataframe to add type one hot encoding to
     :return: dataframe with type one hot encoding
-    """
+    """ 
     type_one_hot = pd.get_dummies(
         df.type.astype(pd.CategoricalDtype(categories=event_types)))
     df = pd.concat([df, type_one_hot], axis=1)
