@@ -747,7 +747,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
 
-                    wandb.log({ f"epoch" : idx, f"train_loss": final_train_loss, "global_step": global_step, f"eval_loss": results['eval_loss'], f"eval_acc": best_acc})
+                    wandb.log({ f"epoch" : idx, f"train_loss": final_train_loss, "global_step": global_step, f"eval_loss": results['eval_loss'], f"eval_acc": results['eval_acc']})
 
     return best_acc
 

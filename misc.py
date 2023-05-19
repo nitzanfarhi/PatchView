@@ -424,8 +424,13 @@ def handle_nonbool_metadata(cur_repo, cur_metadata):
 def handle_timezones(timezones_path, cur_repo, file):
     timezone_df = pd.DataFrame(0, index=range(cur_repo.shape[0]), columns=[
                                f"timezone_{x}" for x in range(-12, 15)])
-    with open(os.path.join(timezones_path, file + ".json"), 'r') as f:
-        timezone = int(float(f.read()))
+    try:
+        with open(os.path.join(timezones_path, file + ".json"), 'r') as f:
+            timezone = int(float(f.read()))
+    except FileNotFoundError:
+        with open(os.path.join(timezones_path.lower(), file.lower() + ".json"), 'r') as f:
+            timezone = int(float(f.read()))
+
     cur_repo = concat_ignore_index(cur_repo, timezone_df)
 
     cur_repo[f"timezone_{timezone}"] = 1
