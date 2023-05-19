@@ -17,15 +17,21 @@ class EventsDataset(GeneralDataset):
     def __init__(self, args, all_json, keys, set_name, cache=True, backs=10):
         self.args = args
         self.backs = args.event_window_size
+        self.positive_x_set = []
+        self.positive_info = []
+        self.negative_x_set = []
+        self.negative_info = []
         self.x_set = []
         self.y_set = []
         self.final_commit_info = []
+        
         self.current_path = os.path.join(
             args.cache_dir, "events", f"events_{set_name}.json")
         self.timezones_path = os.path.join(
             args.cache_dir, "events", "timezones")
         self.cache = not args.recreate_cache
         self.hash_list = keys
+
 
         if self.cache and os.path.exists(self.current_path):
             logger.warning(f"Loading {set_name} from cache - {self.current_path}")
@@ -38,6 +44,8 @@ class EventsDataset(GeneralDataset):
             self.create_list_of_hashes(all_json)
             torch.save((self.x_set, self.y_set,
                        self.final_commit_info), self.current_path)
+            
+        
 
     def create_list_of_hashes(self, all_json):
         repo_dict = {}
@@ -69,18 +77,32 @@ class EventsDataset(GeneralDataset):
                     continue
                 assert len(wanted_row) == 1, "Hash is not unique"
                 wanted_row = wanted_row[0]
-                self.final_commit_info.append(
-                    ({"name": repo_name, "hash": mhash, "label": label}))
                 event_window = get_event_window(
                     cur_repo, wanted_row, backs=self.backs)
                 event_window = add_metadata(
                     self.timezones_path, all_metadata, event_window, repo_name)
                 event_window = event_window.drop(["Hash", "Vuln"], axis=1)
                 event_window = event_window.fillna(0)
-                self.x_set.append(event_window.values)
                 self.y_set.append(label)
+                if label == 1:
+                    self.positive_info.append(({"name": repo_name, "hash": mhash, "label": label}))
+                    self.positive_x_set.append(event_window.values)
+                elif label == 0:
+                    self.negative_info.append(({"name": repo_name, "hash": mhash, "label": label}))
+                    self.negative_x_set.append(event_window.values)
+                else:
+                    raise ValueError("Label is not 0 or 1")
+
             except KeyError as e:
                 print(e)
+
+            wanted_len = min(len(self.positive_x_set), len(self.negative_x_set))
+            self.x_set = self.positive_x_set[:wanted_len] + self.negative_x_set[:wanted_len]
+            self.y_set = [1] * wanted_len + [0] * wanted_len
+            self.final_commit_info = self.positive_info[:wanted_len] + self.negative_info[:wanted_len]
+
+
+            
 
     def __len__(self):
         return len(self.x_set)

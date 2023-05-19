@@ -525,7 +525,7 @@ def parse_args():
     parser.add_argument("--event_window_size", type=int, default=10, help="event window size")
     parser.add_argument("--code_merge_file", action="store_true", help="code merge file")
     parser.add_argument("--folds", type=int, default=5, help="folds")
-    parser.add_argument("--patience", type=int, default=30, help="patience")
+    parser.add_argument("--patience", type=int, default=100, help="patience")
     return parser.parse_args()
 
 
@@ -761,6 +761,7 @@ def test(args, model, dataset, idx, fold=0):
     # Note that DistributedSampler samples randomly
 
 
+
     # multi-gpu evaluate
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -869,19 +870,6 @@ def main(args):
     import pickle
     import json
     import pandas
-    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json","r") as mfile:
-    #     train_details = json.load(mfile)
-    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json","r") as mfile:
-    #     val_details = json.load(mfile)
-    # with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json","r") as mfile:
-    #     test_details = json.load(mfile)
-    # mall = {}
-    # for row in train_details:
-    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
-    # for row in val_details:
-    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
-    # for row in test_details:
-    #     mall[row[3]] = {"label":row[2],"repo":row[0]}
 
     with open(os.path.join(args.cache_dir,"orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
@@ -907,7 +895,7 @@ def main(args):
     best_val_idx = None
     best_model = None
 
-    splits=KFold(n_splits=args.folds,shuffle=False) #,random_state=args.seed)
+    splits=KFold(n_splits=args.folds,shuffle=True, random_state=args.seed)
 
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
         print('Fold {}'.format(fold + 1))
