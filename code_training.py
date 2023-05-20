@@ -231,18 +231,21 @@ class TextDataset(Dataset):
         self.cache = not args.recreate_cache
         self.language = args.language
         self.counter = 0
-        self.final_list_tensors = []
+        self.negative_final_list_tensors = []
+        self.positive_final_list_tensors = []
         self.final_list_labels = []
-        self.final_commit_info = []
+        self.negative_final_commit_info = []
+        self.positive_final_commit_info = []
+        self.keys = keys
+        self.all_json = all_json
         self.commit_path = os.path.join(
-            args.cache_dir, "code", f"{self.language}_{self.phase}.git")
+            args.cache_dir, "code", f"commits.json")
         self.final_cache_list = os.path.join(
             args.cache_dir, "code", f"{args.embedding_type}_{self.language}_{self.phase}_final_list.pickle")
         self.positive_label_counter = 0
         self.negative_label_counter = 0
         self.commit_repos_path = args.commit_repos_path
 
-        # self.load_commits_and_labels(args, phase)
         self.csv_list = keys
 
         if self.args.embedding_type == 'simple_with_tokens':
@@ -254,25 +257,19 @@ class TextDataset(Dataset):
             self.tokenizer.add_special_tokens({'additional_special_tokens': [
                                               REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]})
 
-        # commit_list = self.get_commits()
-        # logger.warning(f"Number of commits: {len(commit_list)}")
-        self.create_final_list(all_json, keys)
-        logger.warning(f"Number of instances: {len(self.final_list_tensors)}")
-        logger.warning(
-            f"Number of positive instances: {sum(self.final_list_labels)}")
+        self.commit_list = self.get_commits()
+        logger.warning(f"Number of commits: {len(self.commit_list)}")
+        self.create_final_list()
 
-    def load_commits_and_labels(self, args, phase):
-        if phase == 'train':
-            with open(os.path.join(args.cache_dir, "orc", "orchestrator_train.json"), 'r') as f:
-                self.csv_list = json.load(f)
-        elif phase == 'val':
-            with open(os.path.join(args.cache_dir, "orc", "orchestrator_val.json"), 'r') as f:
-                self.csv_list = json.load(f)
-        elif phase == 'test':
-            with open(os.path.join(args.cache_dir, "orc", "orchestrator_test.json"), 'r') as f:
-                self.csv_list = json.load(f)
-        else:
-            raise ValueError(f"Unknown phase: {phase}")
+        min_len = min(len(self.positive_final_list_tensors), len(self.negative_final_list_tensors))
+        self.positive_final_list_tensors = self.positive_final_list_tensors[:min_len]
+        self.negative_final_list_tensors = self.negative_final_list_tensors[:min_len]
+        self.positive_final_commit_info = self.positive_final_commit_info[:min_len]
+        self.negative_final_commit_info = self.negative_final_commit_info[:min_len]
+        self.final_list_tensors = self.positive_final_list_tensors + self.negative_final_list_tensors
+        self.final_list_labels = [1]*len(self.positive_final_list_tensors) + [0]*len(self.negative_final_list_tensors)
+        self.final_commit_info = self.positive_final_commit_info + self.negative_final_commit_info
+
 
     def get_commits(self):
         result = []
@@ -284,24 +281,26 @@ class TextDataset(Dataset):
                 return pickle.load(f)
         else:
             logger.warning("Get Commits from repos")
-            for repo in (bar := tqdm(self.csv_list)):
-                for cur_hash, label in self.csv_list[repo]:
-                    try:
-                        if cur_hash == "":
-                            assert False, "shouldnt be empty hashes here"
-                            continue
-
-                        bar.set_description(
-                            f"Repo - {repo} - Positives: {positives}, Negatives: {negatives}")
-                        result.append(self.prepare_dict(
-                            repo.replace("/", "_"), label, cur_hash))
-                        if label == 1:
-                            positives += 1
-                        else:
-                            negatives += 1
-                    except Exception as e:
-                        print(e)
+            for commit in (pbar := tqdm(list(self.keys)[:], leave=False)):
+                try:
+                    if commit == "":
+                        assert False, "shouldnt be empty hashes here"
                         continue
+
+                    repo = self.all_json[commit]["repo"]
+                    label = self.all_json[commit]["label"]
+                    result.append(self.prepare_dict(
+                        repo.replace("/", "_"), label, commit))
+                    if label == 1:
+                        positives += 1
+                    else:
+                        negatives += 1
+                        
+                    pbar.set_description(
+                        f"Repo - {repo} - Positives: {positives}, Negatives: {negatives}")
+                except Exception as e:
+                    print(e)
+                    continue
 
             with open(self.commit_path, 'wb') as f:
                 pickle.dump(result, f)
@@ -351,28 +350,32 @@ class TextDataset(Dataset):
         final_dict["label"] = label
         final_dict["repo"] = repo
         final_dict["message"] = commit.msg
-
-        for file in commit.modified_files:
-            cur_dict = self.add_code_data_to_dict(file)
-            if cur_dict is not None:
-                final_dict["files"].append(cur_dict)
-
+        try:
+            for file in commit.modified_files:
+                cur_dict = self.add_code_data_to_dict(file)
+                if cur_dict is not None:
+                    final_dict["files"].append(cur_dict)
+        except Exception as e:
+            print(e)
+            final_dict["files"] = []
+            return final_dict
         return final_dict
 
-    def create_final_list(self, all_json, keys):
+    def create_final_list(self):
         if os.path.exists(self.final_cache_list) and self.cache:
             logger.warning("Get final list from cache")
             with open(self.final_cache_list, 'rb') as f:
                 cached_list = torch.load(f)
-                self.final_list_tensors = cached_list['input_ids']
-                self.final_list_labels = cached_list['labels']
-                self.final_commit_info = cached_list['commit_info']
+                self.positive_final_list_tensors = cached_list["positive_input_ids"]
+                self.negative_final_list_tensors = cached_list["negative_input_ids"]
+                self.positive_final_commit_info = cached_list["positive_info"]
+                self.negative_final_commit_info = cached_list["negative_info"]
             return
 
         logger.warning("Create final list")
-        for commit in (pbar := tqdm(keys[:], leave=False)):
+        for commit in (pbar := tqdm(self.commit_list, leave=False)):
             token_arr_lst = handle_commit(
-                all_json[commit],
+                commit,
                 self.tokenizer,
                 self.args,
                 language=self.language,
@@ -380,41 +383,25 @@ class TextDataset(Dataset):
 
             for token_arr in token_arr_lst:
                 if token_arr is not None:
-                    self.final_list_tensors.append(
-                        torch.tensor(token_arr['input_ids']))
-                    self.final_list_labels.append(
-                        torch.tensor(int(all_json[commit]['label'])))
-                    self.final_commit_info.append(all_json[commit])
-            # print(len(token_arr_lst))
-            if int(all_json[commit]['label']) == 1:
-                self.positive_label_counter += len(token_arr_lst)
-            else:
-                self.negative_label_counter += len(token_arr_lst)
+                    if int(commit['label']) == 1:
+                        self.positive_final_list_tensors.append(
+                            torch.tensor(token_arr['input_ids']))
+                        self.positive_final_commit_info.append(commit)
+                    else:
+                        self.negative_final_list_tensors.append(
+                            torch.tensor(token_arr['input_ids']))
+                        self.negative_final_commit_info.append(commit)
 
             pbar.set_description(
-                f"Current Project: {all_json[commit]['name']} Positive: {self.positive_label_counter}, Negative: {self.negative_label_counter}")
+                f"Current Project: {commit['repo']} Positive: {len(self.positive_final_commit_info)}, Negative: {len(self.negative_final_commit_info)}")
 
-        if not self.args.dont_balance:
-            self.balance_data()
 
         with open(self.final_cache_list, 'wb') as f:
-            torch.save({"input_ids": self.final_list_tensors,
-                       "labels": self.final_list_labels, "commit_info": self.final_commit_info}, f)
+            torch.save({"positive_input_ids":self.positive_final_list_tensors,
+                        "negative_input_ids":self.negative_final_list_tensors,
+                        "positive_info":self.positive_final_commit_info,
+                        "negative_info":self.negative_final_commit_info},f) 
 
-    def balance_data(self):
-        logger.warning("Balance data")
-        min_label = min(self.positive_label_counter,
-                        self.negative_label_counter)
-        wanted_negatives = [i for i, val in enumerate(
-            self.final_list_labels) if val == 0][:min_label]
-        wanted_positivies = [i for i, val in enumerate(
-            self.final_list_labels) if val == 1][:min_label]
-        self.final_list_tensors = [self.final_list_tensors[x]
-                                   for x in wanted_negatives + wanted_positivies]
-        self.final_list_labels = [self.final_list_labels[x]
-                                  for x in wanted_negatives + wanted_positivies]
-        logger.warning(
-            f"Positives: {len(wanted_positivies)}, Negatives: {len(wanted_negatives)}, Total: {len(self.final_list_tensors)}")
 
     def __len__(self):
         return len(self.final_list_tensors)
@@ -810,7 +797,7 @@ def test(args, model, dataset, idx, fold=0):
 
 
 class Model(nn.Module):
-    def __init__(self, encoder, config, tokenizer, args):
+    def __init__(self, encoder, config, args):
         super(Model, self).__init__()
         self.encoder = encoder
         self.config = config
@@ -831,6 +818,25 @@ class Model(nn.Module):
             return prob
 
 
+def get_model(args, dataset, tokenizer):
+    if args.source_model == "Code" or args.source_model == "Message":
+        model = get_text_model(args)
+        model.encoder.resize_token_embeddings(len(tokenizer))
+    elif args.source_model == "Events":
+        model = get_events_model(args, dataset)
+    return model
+
+def get_tokenizer(args):
+    _, _, tokenizer_class = MODEL_CLASSES[args.model_type]
+    tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
+                                                do_lower_case=args.do_lower_case,
+                                                cache_dir=args.model_cache_dir if args.model_cache_dir else None)
+    if args.block_size <= 0:
+        # Our input block size will be the max possible for the model
+        args.block_size = tokenizer.max_len_single_sentence
+    args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+    return tokenizer
+
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available()
                           and not args.no_cuda else "cpu")
@@ -845,7 +851,7 @@ def main(args):
     # Setup logging
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S',
-                        level=logging.DEBUG)
+                        level=logging.WARNING)
     logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
                    args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
 
@@ -876,18 +882,16 @@ def main(args):
 
 
     if args.source_model == "Code" or args.source_model == "Message":
-        tokenizer, model = get_text_model_and_tokenizer(args)
+        tokenizer = get_tokenizer(args)
         dataset = TextDataset(tokenizer, args, mall, mall.keys(), "train")
-        model.encoder.resize_token_embeddings(len(tokenizer))
 
     elif args.source_model == "Events":
         from events_datasets import EventsDataset
+        tokenizer = None
         dataset = EventsDataset(args, mall, mall.keys(), "train")
-        model = get_events_model(args, dataset)
 
     elif args.source_model == "Multi":
         from events_datasets import EventsDataset
-
         raise NotImplementedError
     
     best_acc = 0
@@ -900,21 +904,14 @@ def main(args):
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
         print('Fold {}'.format(fold + 1))
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args, name = f"{args.source_model}_{fold}") as run:
+            model = get_model(args, dataset, tokenizer)
             run.define_metric("epoch")
             train(args, dataset, model, fold, train_idx, run, eval_idx=val_idx)
             test(args, model, dataset, val_idx, fold=fold)
 
-            model_restart(model, args)
-
-
 
     return {}
 
-def model_restart(model, args):
-    assert args.source_model == "Events"
-    for layer in model.children():
-        if hasattr(layer, 'reset_parameters'):
-            layer.reset_parameters()
 
 def get_events_model(args, dataset):
     xshape1 = dataset[0][0].shape[0]
@@ -967,7 +964,30 @@ def get_text_model_and_tokenizer(args):
         model = Model(model, config, tokenizer, args)
     return tokenizer,model
 
+def get_text_model(args):
+    config_class, model_class, _ = MODEL_CLASSES[args.model_type]
+    config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
+                                          cache_dir=args.model_cache_dir if args.model_cache_dir else None, num_labels=2)
+    config.num_labels = 2
+    config.hidden_dropout_prob = args.dropout
+    config.classifier_dropout = args.dropout
+    if args.model_name_or_path:
+        model = model_class.from_pretrained(args.model_name_or_path,
+                                            from_tf=bool(
+                                                '.ckpt' in args.model_name_or_path),
+                                            config=config,
+                                            cache_dir=args.model_cache_dir if args.model_cache_dir else None)
+    else:
+        model = model_class(config)
 
+    if args.model_type == "roberta_classification":
+        config.hidden_dropout_prob = args.dropout
+        config.attention_probs_dropout_prob = args.dropout
+        model = RobertaClass(model, args)
+        logger.warning("Using RobertaClass")
+    else:
+        model = Model(model, config, args)
+    return model
 
 if __name__ == "__main__":
     args = parse_args()
