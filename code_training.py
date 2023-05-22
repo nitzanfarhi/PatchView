@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function
+import sys
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn import CrossEntropyLoss, MSELoss
 import copy
@@ -231,11 +232,9 @@ class TextDataset(Dataset):
         self.cache = not args.recreate_cache
         self.language = args.language
         self.counter = 0
-        self.negative_final_list_tensors = []
-        self.positive_final_list_tensors = []
         self.final_list_labels = []
-        self.negative_final_commit_info = []
-        self.positive_final_commit_info = []
+        self.final_list_tensors = []
+        self.final_commit_info = []
         self.keys = keys
         self.all_json = all_json
         self.commit_path = os.path.join(
@@ -258,18 +257,36 @@ class TextDataset(Dataset):
                                               REP_BEFORE_TOKEN, REP_AFTER_TOKEN, INS_TOKEN, DEL_TOKEN]})
 
         self.commit_list = self.get_commits()
+        self.commit_list = sorted(self.commit_list, key=lambda x: x['hash'])
         logger.warning(f"Number of commits: {len(self.commit_list)}")
         self.create_final_list()
+        self.balance_data()
 
-        min_len = min(len(self.positive_final_list_tensors), len(self.negative_final_list_tensors))
-        self.positive_final_list_tensors = self.positive_final_list_tensors[:min_len]
-        self.negative_final_list_tensors = self.negative_final_list_tensors[:min_len]
-        self.positive_final_commit_info = self.positive_final_commit_info[:min_len]
-        self.negative_final_commit_info = self.negative_final_commit_info[:min_len]
-        self.final_list_tensors = self.positive_final_list_tensors + self.negative_final_list_tensors
-        self.final_list_labels = [1]*len(self.positive_final_list_tensors) + [0]*len(self.negative_final_list_tensors)
-        self.final_commit_info = self.positive_final_commit_info + self.negative_final_commit_info
+    def balance_data(self):
+        pos_idxs = []
+        neg_idxs = []
+        
+        for i, label in enumerate(self.final_list_labels):
+            if label == 1:
+                pos_idxs.append(i)
+            else:
+                neg_idxs.append(i)
+        min_idxs = min(len(pos_idxs), len(neg_idxs))
+        pos_idxs = pos_idxs[:min_idxs]
+        neg_idxs = neg_idxs[:min_idxs]
+        
+        tmp_final_list_tensors = []
+        tmp_final_list_labels = []
+        tmp_final_commit_info = []
+        for i in range(len(self.final_list_labels)):
+            if i in pos_idxs or i in neg_idxs:
+                tmp_final_list_tensors.append(self.final_list_tensors[i])
+                tmp_final_list_labels.append(self.final_list_labels[i])
+                tmp_final_commit_info.append(self.final_commit_info[i])
 
+        self.final_list_tensors = tmp_final_list_tensors
+        self.final_list_labels = tmp_final_list_labels
+        self.final_commit_info = tmp_final_commit_info
 
     def get_commits(self):
         result = []
@@ -366,14 +383,13 @@ class TextDataset(Dataset):
             logger.warning("Get final list from cache")
             with open(self.final_cache_list, 'rb') as f:
                 cached_list = torch.load(f)
-                self.positive_final_list_tensors = cached_list["positive_input_ids"]
-                self.negative_final_list_tensors = cached_list["negative_input_ids"]
-                self.positive_final_commit_info = cached_list["positive_info"]
-                self.negative_final_commit_info = cached_list["negative_info"]
+                self.final_commit_info = cached_list["final_commit_info"]
+                self.final_list_tensors = cached_list["final_list_tensors"]
+                self.final_list_labels = cached_list["final_list_labels"]
             return
 
         logger.warning("Create final list")
-        for commit in (pbar := tqdm(self.commit_list, leave=False)):
+        for commit in (pbar := tqdm(self.commit_list[:100], leave=False)):
             token_arr_lst = handle_commit(
                 commit,
                 self.tokenizer,
@@ -383,24 +399,20 @@ class TextDataset(Dataset):
 
             for token_arr in token_arr_lst:
                 if token_arr is not None:
-                    if int(commit['label']) == 1:
-                        self.positive_final_list_tensors.append(
-                            torch.tensor(token_arr['input_ids']))
-                        self.positive_final_commit_info.append(commit)
-                    else:
-                        self.negative_final_list_tensors.append(
-                            torch.tensor(token_arr['input_ids']))
-                        self.negative_final_commit_info.append(commit)
+                    self.final_list_tensors.append(
+                        torch.tensor(token_arr['input_ids']))
+                    self.final_commit_info.append(commit)
+                    self.final_list_labels.append(commit['label'])
+
 
             pbar.set_description(
-                f"Current Project: {commit['repo']} Positive: {len(self.positive_final_commit_info)}, Negative: {len(self.negative_final_commit_info)}")
+                f"Current Project: {commit['repo']}")
 
 
         with open(self.final_cache_list, 'wb') as f:
-            torch.save({"positive_input_ids":self.positive_final_list_tensors,
-                        "negative_input_ids":self.negative_final_list_tensors,
-                        "positive_info":self.positive_final_commit_info,
-                        "negative_info":self.negative_final_commit_info},f) 
+            torch.save({"final_commit_info":self.final_commit_info,
+                        "final_list_tensors":self.final_list_tensors,
+                        "final_list_labels":self.final_list_labels},f) 
 
 
     def __len__(self):
@@ -409,6 +421,52 @@ class TextDataset(Dataset):
     def __getitem__(self, i):
         return self.final_list_tensors[i], self.final_list_labels[i]
 
+
+
+class MyConcatDataset(torch.utils.data.Dataset):
+    def __init__(self, code_dataset, message_dataset, events_dataset):
+        self.code_dataset = code_dataset
+        self.message_dataset = message_dataset
+        self.events_dataset = events_dataset
+
+        self.merged_dataset = []
+        self.merged_labels = []
+        self.final_commit_info = []
+        code_counter = 0
+        message_counter = 0
+        events_counter = 0
+
+        in_counter = 0 
+        
+        while code_counter < len(code_dataset) and message_counter < len(message_dataset) and events_counter < len(events_dataset):
+            code_commit = code_dataset.final_commit_info[code_counter]
+            message_commit = message_dataset.final_commit_info[message_counter]
+            events_commit = events_dataset.final_commit_info[events_counter]
+
+            if code_commit["hash"] == message_commit["hash"] == events_commit["hash"]:
+                self.merged_dataset.append((code_dataset[code_counter][0], message_dataset[message_counter][0], events_dataset[events_counter][0]))
+                self.merged_labels.append(code_dataset[code_counter][1])
+                self.final_commit_info.append(code_dataset.final_commit_info[code_counter])
+                in_counter += 1
+                # print(in_counter)
+                code_counter += 1
+                message_counter += 1
+                events_counter += 1
+            elif code_commit["hash"] < message_commit["hash"]:
+                code_counter += 1
+            elif message_commit["hash"] < events_commit["hash"]:
+                message_counter += 1
+            else:
+                events_counter += 1
+
+    def __getitem__(self, i):
+        return self.merged_dataset[i], self.merged_labels[i]
+    
+    def get_info(self, i):
+        return self.merged_info[i]
+
+    def __len__(self):
+        return len(self.merged_dataset)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -513,6 +571,7 @@ def parse_args():
     parser.add_argument("--code_merge_file", action="store_true", help="code merge file")
     parser.add_argument("--folds", type=int, default=5, help="folds")
     parser.add_argument("--patience", type=int, default=100, help="patience")
+    parser.add_argument("--return_class", action="store_true", help="return class")
     return parser.parse_args()
 
 
@@ -552,7 +611,11 @@ def evaluate(args, model, dataset, eval_idx=None):
     logits = []
     labels = []
     for batch in eval_dataloader:
-        inputs = batch[0].to(args.device)
+        if args.source_model == "Multi":
+            inputs = [x.to(args.device) for x in batch[0]]
+        else:
+            inputs = batch[0].to(args.device)
+
         label = batch[1].to(args.device)
         with torch.no_grad():
             lm_loss, logit = model(inputs, label)
@@ -594,7 +657,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     positives = 0
   
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
-                                  batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
+                                  batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
     
     for a in train_dataloader:
         for b in a[1]:
@@ -663,7 +726,10 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
         tr_num = 0
         train_loss = 0
         for step, batch in enumerate(bar):
-            inputs = batch[0].to(args.device)
+            if args.source_model == "Multi":
+                inputs = [x.to(args.device) for x in batch[0]]
+            else:
+                inputs = batch[0].to(args.device)
             labels = batch[1].to(args.device)
             model.train()
             loss, logits = model(inputs, labels)
@@ -763,7 +829,11 @@ def test(args, model, dataset, idx, fold=0):
     logits = []
     labels = []
     for batch in tqdm(eval_dataloader, total=len(eval_dataloader)):
-        inputs = batch[0].to(args.device)
+        if args.source_model == "Multi":
+            inputs = [x.to(args.device) for x in batch[0]]
+        else:
+            inputs = batch[0].to(args.device)
+
         label = batch[1].to(args.device)
         with torch.no_grad():
             logit = model(inputs)
@@ -801,12 +871,14 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.encoder = encoder
         self.config = config
-        self.tokenizer = tokenizer
         self.args = args
 
     def forward(self, input_ids=None, labels=None):
         outputs = self.encoder(input_ids, attention_mask=input_ids.ne(1))[0]
         logits = outputs
+        if not self.args.return_class:
+            return logits
+        
         prob = torch.sigmoid(logits)
         if labels is not None:
             labels = labels.float()
@@ -824,6 +896,8 @@ def get_model(args, dataset, tokenizer):
         model.encoder.resize_token_embeddings(len(tokenizer))
     elif args.source_model == "Events":
         model = get_events_model(args, dataset)
+    elif args.source_model == "Multi":
+        model = get_multi_model(args)
     return model
 
 def get_tokenizer(args):
@@ -892,7 +966,12 @@ def main(args):
 
     elif args.source_model == "Multi":
         from events_datasets import EventsDataset
+        tokenizer = None
+        dataset = get_multi_dataset(args, mall)
+    else:
         raise NotImplementedError
+
+    
     
     best_acc = 0
     fold_best_acc = 0
@@ -901,21 +980,25 @@ def main(args):
 
     splits=KFold(n_splits=args.folds,shuffle=True, random_state=args.seed)
 
+    best_accs = []
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
         print('Fold {}'.format(fold + 1))
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args, name = f"{args.source_model}_{fold}") as run:
             model = get_model(args, dataset, tokenizer)
             run.define_metric("epoch")
-            train(args, dataset, model, fold, train_idx, run, eval_idx=val_idx)
+            best_acc = train(args, dataset, model, fold, train_idx, run, eval_idx=val_idx)
+            best_accs.append(best_acc)
             test(args, model, dataset, val_idx, fold=fold)
 
+            if fold == args.folds - 1:
+                wandb.alert(title = "Finished last run", text = f"Run {max(best_accs)}: {' '.join(sys.argv)}")
 
     return {}
 
 
-def get_events_model(args, dataset):
-    xshape1 = dataset[0][0].shape[0]
-    xshape2 = dataset[0][0].shape[1]
+def get_events_model(args):
+    xshape1 = args.xshape1
+    xshape2 = args.xshape2
     events_config = {'l1': 64, 'l2': 64, 'l3': 64, 'l4': 64}
     if args.model_type == "conv1d" or args.model_type == "default":
         model = Conv1DTune(args,
@@ -931,6 +1014,89 @@ def get_events_model(args, dataset):
     
     model = model.to(args.device)
     return model
+
+class MultiModel(nn.Module):
+    def __init__(self, code_model, message_model, events_model, args):
+        super(MultiModel, self).__init__()
+        self.code_model = code_model
+        self.message_model = message_model
+        self.events_model = events_model
+        self.args = args
+        self.dropout = nn.Dropout(args.dropout)
+        self.classifier = nn.Linear(args.hidden_size * 3, 2)
+
+    def forward(self, data, labels=None):
+        code, message, events = data
+        code = self.code_model(code)
+        message = self.message_model(message)
+        events = self.events_model(events)
+        x = torch.stack([code, message, events], dim=1)
+        x = x.reshape(code.shape[0],-1)
+        x = self.dropout(x)
+        logits = self.classifier(x)
+        prob = torch.sigmoid(logits)
+        if labels is not None:
+            labels = labels.float()
+            loss = torch.log(prob[:, 0]+1e-10)*labels + \
+                torch.log((1-prob)[:, 0]+1e-10)*(1-labels)
+            loss = -loss.mean()
+            return loss, prob
+        else:
+            return prob
+
+
+def get_multi_model(args):
+    code_args = argparse.Namespace(**vars(args))
+    code_args.recreate_cache = True
+    code_args.code_merge_file = True
+    code_args.model_type = "roberta_classification"
+    code_model = get_text_model(code_args)
+    args.hidden_size = code_model.encoder.config.hidden_size
+
+    message_args = argparse.Namespace(**vars(args))
+    message_args.recreate_cache = True
+    message_args.code_merge_file = True
+    message_args.model_type = "roberta_classification"
+    message_model = get_text_model(message_args)
+
+    events_args = argparse.Namespace(**vars(args))
+    events_args.model_type = "conv1d"
+    events_args.recreate_cache = True
+    events_model = get_events_model(events_args)
+    model = MultiModel(code_model, message_model, events_model, args)
+    return model
+
+
+def get_multi_dataset(args, mall):
+    from events_datasets import EventsDataset
+    keys = sorted(list(mall.keys()))
+
+    code_args = argparse.Namespace(**vars(args))
+    code_args.recreate_cache = True
+    code_args.code_merge_file = True
+    code_args.model_type = "roberta_classification"
+    code_tokenizer = get_tokenizer(code_args)
+    code_dataset = TextDataset(code_tokenizer, code_args, mall, keys, "train")
+
+    message_args = argparse.Namespace(**vars(args))
+    message_args.recreate_cache = True
+    message_args.code_merge_file = True
+    message_args.model_type = "roberta_classification"
+    message_tokenizer = get_tokenizer(message_args)
+    message_dataset = TextDataset(message_tokenizer, message_args, mall, keys, "train")
+
+
+    events_args = argparse.Namespace(**vars(args))
+    events_args.model_type = "conv1d"
+    events_args.recreate_cache = True
+    events_dataset = EventsDataset(events_args, mall, keys, "train")
+    args.xshape1 = events_dataset[0][0].shape[0]
+    args.xshape2 = events_dataset[0][0].shape[1]
+
+    concat_dataset = MyConcatDataset(code_dataset, message_dataset, events_dataset)
+
+    return concat_dataset
+
 
 def get_text_model_and_tokenizer(args):
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
@@ -961,7 +1127,7 @@ def get_text_model_and_tokenizer(args):
         model = RobertaClass(model, args)
         logger.warning("Using RobertaClass")
     else:
-        model = Model(model, config, tokenizer, args)
+        model = Model(model, config, args)
     return tokenizer,model
 
 def get_text_model(args):
