@@ -108,9 +108,44 @@ class RobertaClass(torch.nn.Module):
                             ).sum(axis=-2) / attention_mask.sum(axis=-1).unsqueeze(-1)
 
         pooler = self.pre_classifier(hidden_state)
+        if not self.args.return_class:
+            return pooler
         pooler = self.relu(pooler)
+        if self.args.source_model == "Multi" and not self.args.return_class:
+            return pooler
+        
         pooler = self.dropout(pooler)
         logits = self.classifier(pooler)
+        prob = torch.sigmoid(logits)
+        if labels is not None:
+            labels = labels.float()
+            loss = torch.log(prob[:, 0]+1e-10)*labels + \
+                torch.log((1-prob)[:, 0]+1e-10)*(1-labels)
+            loss = -loss.mean()
+            return loss, prob
+        else:
+            return prob
+
+
+class MultiModel(nn.Module):
+    def __init__(self, code_model, message_model, events_model, args):
+        super(MultiModel, self).__init__()
+        self.code_model = code_model
+        self.message_model = message_model
+        self.events_model = events_model
+        self.args = args
+        self.dropout = nn.Dropout(args.dropout)
+        self.classifier = nn.Linear(args.hidden_size * 3, 2)
+
+    def forward(self, data, labels=None):
+        code, message, events = data
+        code = self.code_model(code)
+        message = self.message_model(message)
+        events = self.events_model(events)
+        x = torch.stack([code, message, events], dim=1)
+        x = x.reshape(code.shape[0],-1)
+        x = self.dropout(x)
+        logits = self.classifier(x)
         prob = torch.sigmoid(logits)
         if labels is not None:
             labels = labels.float()

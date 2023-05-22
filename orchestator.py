@@ -104,13 +104,25 @@ def main():
         mall[row[3]] = {"label":row[2],"repo":row[0]}
 
     new_mall = {}
-    for a,b in mall.items():
+    repo_set = set()
+    for a,b in tqdm(mall.items()):
+        repo_set.add(b['repo'])
         if a == "":
             commit = get_benign_commits(b['repo'],[])
             commit_hash = next(commit).hexsha
             new_mall[commit_hash] = {"label":0,"repo":b['repo']}
         else:
             new_mall[a] = b
+
+    for repo in tqdm(repo_set):
+        commit = get_benign_commits(repo,[])
+        for _ in range(4):
+            try:
+                commit_hash = next(commit).hexsha
+                new_mall[commit_hash] = {"label":0,"repo":b['repo']}
+            except StopIteration:
+                continue
+
 
     with open(os.path.join("cache_data","orc","orchestrator.json"), "w") as f:
         json.dump(new_mall, f, indent=4)

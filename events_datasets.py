@@ -51,7 +51,7 @@ class EventsDataset(GeneralDataset):
         repo_dict = {}
         with open(os.path.join(self.args.cache_dir, "events", "repo_metadata.json"), 'r') as f:
             all_metadata = json.load(f)
-        for mhash in tqdm(list(self.hash_list)[:], leave=False):
+        for mhash in tqdm(list(self.hash_list)[:100], leave=False):
             try:
                 if mhash == "":
                     continue
@@ -96,10 +96,10 @@ class EventsDataset(GeneralDataset):
             except KeyError as e:
                 print(e)
 
-            wanted_len = min(len(self.positive_x_set), len(self.negative_x_set))
-            self.x_set = self.positive_x_set[:wanted_len] + self.negative_x_set[:wanted_len]
-            self.y_set = [1] * wanted_len + [0] * wanted_len
-            self.final_commit_info = self.positive_info[:wanted_len] + self.negative_info[:wanted_len]
+        wanted_len = min(len(self.positive_x_set), len(self.negative_x_set))
+        self.x_set = self.positive_x_set[:wanted_len] + self.negative_x_set[:wanted_len]
+        self.y_set = [1] * wanted_len + [0] * wanted_len
+        self.final_commit_info = self.positive_info[:wanted_len] + self.negative_info[:wanted_len]
 
 
             
