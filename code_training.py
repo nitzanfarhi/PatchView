@@ -389,7 +389,7 @@ class TextDataset(Dataset):
             return
 
         logger.warning("Create final list")
-        for commit in (pbar := tqdm(self.commit_list[:100], leave=False)):
+        for commit in (pbar := tqdm(self.commit_list[:], leave=False)):
             token_arr_lst = handle_commit(
                 commit,
                 self.tokenizer,

@@ -51,7 +51,7 @@ class EventsDataset(GeneralDataset):
         repo_dict = {}
         with open(os.path.join(self.args.cache_dir, "events", "repo_metadata.json"), 'r') as f:
             all_metadata = json.load(f)
-        for mhash in tqdm(list(self.hash_list)[:100], leave=False):
+        for mhash in tqdm(list(self.hash_list)[:], leave=False):
             try:
                 if mhash == "":
                     continue
