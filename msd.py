@@ -1,3 +1,9 @@
+import logging
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
 
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from models import get_model
@@ -19,11 +25,6 @@ from transformers import (get_linear_schedule_with_warmup,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           RobertaConfig, RobertaModel, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
-import logging
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.WARNING)
-logger = logging.getLogger(__name__)
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
