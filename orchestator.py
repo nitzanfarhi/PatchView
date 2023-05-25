@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import subprocess
 import git
 import traceback
 from tqdm import tqdm
@@ -19,15 +20,19 @@ TEST_RATE = 0
 
 
 def get_benign_commits(repo, security_commits):
-    number_of_retrieved_commits = 0
-
     cur_repo = COMMIT_REPO_PATH + "\\" + repo.replace("/", "_")
-    all_commit_list = list(Repository(cur_repo).traverse_commits())
-    random.shuffle(all_commit_list)
-    for commit in all_commit_list:
-        if commit not in security_commits:
-            number_of_retrieved_commits += 1
-            yield commit
+    mall = subprocess.run("git rev-list --all --since=2015", stdout=subprocess.PIPE, cwd = cur_repo)
+    mall = mall.stdout.decode('utf-8').split("\n")
+    random.shuffle(mall)
+    for commit in mall:
+        if commit in security_commits:
+            continue
+
+        pydriller_commit = get_commit_from_repo(cur_repo, commit)
+        if len(pydriller_commit.modified_files) == 0:
+            continue
+        
+        yield commit
     return
 
 
@@ -115,29 +120,18 @@ def main():
     counter = 0
     for a, b in tqdm(mall.items()):
         counter += 1
-        if a == "":
-            commit = get_benign_commits(b['repo'], [])
-            commit_hash = next(commit).hash
-            if commit_hash in new_mall:
-                print(f"Already found {commit_hash}-{b}")
-                continue
-            new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
-        else:
-            if a in new_mall:
-                print(f"Already found {a}-{b}")
-                continue
-            new_mall[a] = b
+        new_mall[a] = b
 
-            commit = get_benign_commits(b['repo'], [])
-            for _ in range(2):
-                try:
-                    commit_hash = next(commit).hash
-                    if commit_hash in new_mall:
-                        print(f"Already found {commit_hash}-{b['repo']}-{0}")
-                        continue
-                    new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
-                except StopIteration:
+        commit = get_benign_commits(b['repo'], mall.keys())
+        for _ in range(2):
+            try:
+                commit_hash = next(commit)
+                if commit_hash in new_mall:
+                    print(f"Already found {commit_hash}-{b['repo']}-{0}")
                     continue
+                new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
+            except StopIteration:
+                continue
 
     with open(os.path.join("cache_data", "orc", "orchestrator.json"), "w") as f:
         json.dump(new_mall, f, indent=4)
