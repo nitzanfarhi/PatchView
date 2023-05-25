@@ -1,3 +1,4 @@
+import datetime
 from enum import Enum
 import logging
 import os
@@ -12,11 +13,9 @@ from data_creation import gh_cve_dir, repo_metadata_filename
 from misc import find_best_accuracy, find_best_f1, EnumAction, safe_mkdir
 from misc import Repository, add_metadata
 import sys
-import classes
 import misc
 
 sys.modules['helper'] = misc
-sys.modules['classes'] = classes
 
 DATASET_DIRNAME = "ready_data/"
 event_types = [
@@ -174,7 +173,8 @@ def create_dataset(data_path,
 
         tqdm_update("extract_window")
         if aggr_options == Aggregate.none:
-            cur_repo = add_time_one_hot_encoding(cur_repo, with_idx=True)
+            # cur_repo = add_time_one_hot_encoding(cur_repo, with_idx=True)
+            raise NotImplementedError
         elif aggr_options == Aggregate.before_cve:
             cur_repo = cur_repo.reset_index().drop(["created_at"],
                                                    axis=1).set_index("idx")
@@ -309,7 +309,7 @@ def add_type_one_hot_encoding(df):
     """
     :param df: dataframe to add type one hot encoding to
     :return: dataframe with type one hot encoding
-    """ 
+    """
     type_one_hot = pd.get_dummies(
         df.type.astype(pd.CategoricalDtype(categories=event_types)))
     df = pd.concat([df, type_one_hot], axis=1)
@@ -337,20 +337,21 @@ def get_event_window(cur_repo_data,
     """
     befs = -1
     if aggr_options == Aggregate.after_cve:
-        cur_repo_data = cur_repo_data.reset_index().drop(
-            ["idx"], axis=1).set_index("created_at")
-        cur_repo_data = cur_repo_data.sort_index()
-        hours_befs = 2
+        # cur_repo_data = cur_repo_data.reset_index().drop(
+        #     ["idx"], axis=1).set_index("created_at")
+        # cur_repo_data = cur_repo_data.sort_index()
+        # hours_befs = 2
 
-        indicator = event[0] - datetime.timedelta(days=0, hours=hours_befs)
-        starting_time = indicator - datetime.timedelta(days=days, hours=hours)
-        res = cur_repo_data[starting_time:indicator]
-        new_row = pd.DataFrame([[0] * len(res.columns)],
-                               columns=res.columns,
-                               index=[starting_time])
-        res = pd.concat([new_row, res], ignore_index=False)
-        res = res.resample(f'{resample}H').sum()
-        res = add_time_one_hot_encoding(res, with_idx=False)
+        # indicator = event[0] - datetime.timedelta(days=0, hours=hours_befs)
+        # starting_time = indicator - datetime.timedelta(days=days, hours=hours)
+        # res = cur_repo_data[starting_time:indicator]
+        # new_row = pd.DataFrame([[0] * len(res.columns)],
+        #                        columns=res.columns,
+        #                        index=[starting_time])
+        # res = pd.concat([new_row, res], ignore_index=False)
+        # res = res.resample(f'{resample}H').sum()
+        # res = add_time_one_hot_encoding(res, with_idx=False)
+        raise NotImplementedError
 
     elif aggr_options == Aggregate.before_cve:
         start = max(0, event - backs)

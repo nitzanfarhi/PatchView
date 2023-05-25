@@ -4,6 +4,8 @@ import random
 import git
 import traceback
 from tqdm import tqdm
+from pydriller import Repository
+
 SEED = 0x1337
 
 repo_commits_location = r"cache_data\repo_commits.json"
@@ -18,14 +20,16 @@ TEST_RATE = 0
 
 def get_benign_commits(repo, security_commits):
     number_of_retrieved_commits = 0
-    repo = git.Repo(COMMIT_REPO_PATH + "\\" + repo.replace("/", "_"))
-    all_commit_list = list(repo.iter_commits())
+
+    cur_repo = COMMIT_REPO_PATH + "\\" + repo.replace("/", "_")
+    all_commit_list = list(Repository(cur_repo).traverse_commits())
     random.shuffle(all_commit_list)
     for commit in all_commit_list:
         if commit not in security_commits:
             number_of_retrieved_commits += 1
             yield commit
     return
+
 
 def add_code_data_to_dict(file):
     cur_dict = {}
@@ -57,16 +61,18 @@ def add_code_data_to_dict(file):
     cur_dict["added"] = file.diff_parsed["added"]
     cur_dict["deleted"] = file.diff_parsed["deleted"]
     return cur_dict
-    
+
+
 def get_commit_from_repo(cur_repo, hash):
     from pydriller import Repository
-    print(cur_repo,hash)
-    return next(Repository(cur_repo, single=hash).traverse_commits())
+    res = next(Repository(cur_repo, single=hash).traverse_commits())
+    return res
+
 
 def prepare_dict(repo, commit, label):
     try:
         commit = get_commit_from_repo(
-            os.path.join(COMMIT_REPO_PATH, repo.replace("/","_")), commit)
+            os.path.join(COMMIT_REPO_PATH, repo.replace("/", "_")), commit)
         final_dict = {}
         final_dict["name"] = commit.project_name
         final_dict["hash"] = commit.hash
@@ -86,46 +92,56 @@ def prepare_dict(repo, commit, label):
 
     return final_dict
 
+
 def main():
     random.seed(SEED)
 
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json","r") as mfile:
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json", "r") as mfile:
         train_details = json.load(mfile)
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json","r") as mfile:
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json", "r") as mfile:
         val_details = json.load(mfile)
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json","r") as mfile:
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json", "r") as mfile:
         test_details = json.load(mfile)
     mall = {}
     for row in train_details:
-        mall[row[3]] = {"label":row[2],"repo":row[0]}
+        mall[row[3]] = {"label": row[2], "repo": row[0]}
     for row in val_details:
-        mall[row[3]] = {"label":row[2],"repo":row[0]}
+        mall[row[3]] = {"label": row[2], "repo": row[0]}
     for row in test_details:
-        mall[row[3]] = {"label":row[2],"repo":row[0]}
+        mall[row[3]] = {"label": row[2], "repo": row[0]}
 
     new_mall = {}
     repo_set = set()
-    for a,b in tqdm(mall.items()):
-        repo_set.add(b['repo'])
+    counter = 0
+    for a, b in tqdm(mall.items()):
+        counter += 1
         if a == "":
-            commit = get_benign_commits(b['repo'],[])
-            commit_hash = next(commit).hexsha
-            new_mall[commit_hash] = {"label":0,"repo":b['repo']}
+            commit = get_benign_commits(b['repo'], [])
+            commit_hash = next(commit).hash
+            if commit_hash in new_mall:
+                print(f"Already found {commit_hash}-{b}")
+                continue
+            new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
         else:
+            if a in new_mall:
+                print(f"Already found {a}-{b}")
+                continue
             new_mall[a] = b
 
-    for repo in tqdm(repo_set):
-        commit = get_benign_commits(repo,[])
-        for _ in range(4):
-            try:
-                commit_hash = next(commit).hexsha
-                new_mall[commit_hash] = {"label":0,"repo":b['repo']}
-            except StopIteration:
-                continue
+            commit = get_benign_commits(b['repo'], [])
+            for _ in range(2):
+                try:
+                    commit_hash = next(commit).hash
+                    if commit_hash in new_mall:
+                        print(f"Already found {commit_hash}-{b['repo']}-{0}")
+                        continue
+                    new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
+                except StopIteration:
+                    continue
 
-
-    with open(os.path.join("cache_data","orc","orchestrator.json"), "w") as f:
+    with open(os.path.join("cache_data", "orc", "orchestrator.json"), "w") as f:
         json.dump(new_mall, f, indent=4)
+
 
 class CommitNotFound(Exception):
     """Raised when the commit is not found"""
@@ -138,36 +154,34 @@ def split_randomly(data):
 
     all_commits = []
     for repo in tqdm(data_keys):
-            print(repo)
-            positive_repo_counter = 0
-            negative_repo_counter = 0
-            for commit in data[repo]:
-                if commit == "":
-                    continue
-                try:
-                    commit_dict[commit] = prepare_dict(repo, commit, 1)
-                    positive_repo_counter +=1
-                except CommitNotFound:
-                    print(commit)
-                    continue
+        print(repo)
+        positive_repo_counter = 0
+        negative_repo_counter = 0
+        for commit in data[repo]:
+            if commit == "":
+                continue
+            try:
+                commit_dict[commit] = prepare_dict(repo, commit, 1)
+                positive_repo_counter += 1
+            except CommitNotFound:
+                print(commit)
+                continue
 
-            commit = get_benign_commits(repo, data[repo])
-            while negative_repo_counter < positive_repo_counter:
-                try:    
-                    current_commit = next(commit)
-                except StopIteration:
-                    break
-                
-                commit_hash = current_commit.hexsha
-                try:
-                    commit_dict[commit_hash] = prepare_dict(repo, commit_hash,0)
-                    negative_repo_counter += 1
-                except CommitNotFound:
-                    continue
+        commit = get_benign_commits(repo, data[repo])
+        while negative_repo_counter < positive_repo_counter:
+            try:
+                current_commit = next(commit)
+            except StopIteration:
+                break
 
+            commit_hash = current_commit.hexsha
+            try:
+                commit_dict[commit_hash] = prepare_dict(repo, commit_hash, 0)
+                negative_repo_counter += 1
+            except CommitNotFound:
+                continue
 
     random.shuffle(all_commits)
-
 
     return commit_dict
 
