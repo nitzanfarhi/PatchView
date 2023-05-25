@@ -1,9 +1,9 @@
 # %%
 import importlib
-import code_training
+import msd
 import events_models
 importlib.reload(events_models)
-importlib.reload(code_training)
+importlib.reload(msd)
 import argparse
 import os
 import json
@@ -17,7 +17,7 @@ logger.setLevel(logging.DEBUG)
 
 
 sys.argv = ["run.py"]
-args = code_training.parse_args()
+args = msd.parse_args()
 args.cache_dir = "cache_data"
 args.model_type = "roberta"
 args.n_gpu = 1
@@ -40,11 +40,11 @@ with open(r"C:\Users\nitzan\local\analyzeCVE\data_collection\data\repo_commits.j
 
 # %%
 import importlib
-import code_training
+import msd
 import events_datasets
 
 importlib.reload(events_datasets)
-importlib.reload(code_training)
+importlib.reload(msd)
 
 
 keys = sorted(list(mall.keys()))
@@ -55,9 +55,9 @@ code_args = argparse.Namespace(**vars(args))
 code_args.recreate_cache = True
 code_args.code_merge_file = True
 code_args.model_type = "roberta_classification"
-code_tokenizer = code_training.get_tokenizer(code_args)
-code_dataset = code_training.TextDataset(code_tokenizer, code_args, mall, keys, "train")
-code_model = code_training.get_text_model(code_args)
+code_tokenizer = msd.get_tokenizer(code_args)
+code_dataset = msd.TextDataset(code_tokenizer, code_args, mall, keys, "train")
+code_model = msd.get_text_model(code_args)
 args.hidden_size = code_model.encoder.config.hidden_size
 
 
@@ -66,9 +66,9 @@ message_args = argparse.Namespace(**vars(args))
 message_args.recreate_cache = True
 message_args.code_merge_file = True
 message_args.model_type = "roberta_classification"
-message_tokenizer = code_training.get_tokenizer(message_args)
-message_dataset = code_training.TextDataset(message_tokenizer, message_args, mall, keys, "train")
-message_model = code_training.get_text_model(message_args)
+message_tokenizer = msd.get_tokenizer(message_args)
+message_dataset = msd.TextDataset(message_tokenizer, message_args, mall, keys, "train")
+message_model = msd.get_text_model(message_args)
 
 
 # %%
@@ -76,7 +76,7 @@ events_args = argparse.Namespace(**vars(args))
 events_args.model_type = "conv1d"
 events_args.recreate_cache = True
 events_dataset = events_datasets.EventsDataset(events_args, mall, keys, "train")
-events_model = code_training.get_events_model(events_args, events_dataset)
+events_model = msd.get_events_model(events_args, events_dataset)
 
 
 # %%

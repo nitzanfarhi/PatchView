@@ -260,27 +260,6 @@ def generator(feat, labels):
     return
 
 
-def find_threshold(model, x_train_scaled):
-    import tensorflow as tf
-    reconstructions = model.predict(x_train_scaled)
-    # provides losses of individual instances
-    reconstruction_errors = tf.keras.losses.msle(reconstructions,
-                                                 x_train_scaled)
-    return np.mean(reconstruction_errors.numpy()) + np.std(
-        reconstruction_errors.numpy())
-
-
-def get_predictions(model, x_test_scaled, threshold):
-    import tensorflow as tf
-
-    predictions = model.predict(x_test_scaled)
-    # provides losses of individual instances
-    errors = tf.keras.losses.msle(predictions, x_test_scaled)
-    # 0 = anomaly, 1 = normal
-    anomaly_mask = pd.Series(errors) > threshold
-    return anomaly_mask.map(lambda x: 0.0 if x == True else 1.0)
-
-
 try:
     token = open(r'C:\secrets\github_token.txt', 'r').read()
 except FileNotFoundError:

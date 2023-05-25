@@ -5,6 +5,7 @@ import os
 import subprocess
 import traceback
 import logging
+import urllib.request
 
 import pandas as pd
 import data_graphql
@@ -22,7 +23,7 @@ logging.basicConfig(
     datefmt='%H:%M:%S',
     level=logging.DEBUG)
 
-logger = logging.getLogger('analyze_cve')
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 logger.addHandler(logging.StreamHandler())
@@ -233,14 +234,13 @@ datasets_foldername = "datasets"
 
 
 def cve_preprocess(output_dir, cache_csv=False):
-    import wget
 
     logger.debug("Downloading CVE dataset")
     safe_mkdir(os.path.join(output_dir, datasets_foldername))
     if not cache_csv:
         cve_xml = "https://cve.mitre.org/data/downloads/allitems.csv"
-        wget.download(cve_xml,
-                      out=os.path.join(output_dir, datasets_foldername))
+        urllib.request.urlretrieve(
+            cve_xml, os.path.join(output_dir, datasets_foldername))
 
     cves = pd.read_csv(
         os.path.join(output_dir, datasets_foldername, "allitems.csv"),
