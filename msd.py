@@ -4,20 +4,6 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-
-from torch.utils.data import DataLoader, SubsetRandomSampler
-from models import get_model
-from tqdm import tqdm
-from sklearn.model_selection import KFold
-from datasets import EventsDataset, MyConcatDataset, TextDataset
-import wandb
-import torch
-import numpy as np
-import random
-import os
-import argparse
-import sys
-import json
 from transformers import (get_linear_schedule_with_warmup,
                           BertConfig, BertForMaskedLM, BertTokenizer,
                           GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
@@ -25,10 +11,23 @@ from transformers import (get_linear_schedule_with_warmup,
                           RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer,
                           RobertaConfig, RobertaModel, RobertaTokenizer,
                           DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
+import json
+import sys
+import argparse
+import os
+import random
+import numpy as np
+import torch
+import wandb
+from datasets import EventsDataset, MyConcatDataset, TextDataset
+from sklearn.model_selection import KFold
+from tqdm import tqdm
+from models import get_model
+from torch.utils.data import DataLoader, SubsetRandomSampler
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
-PROJECT_NAME = 'MSD2'
+PROJECT_NAME = 'MSD3'
 
 
 MODEL_CLASSES = {
@@ -101,7 +100,7 @@ def parse_args():
                         help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument("--learning_rate", "-lr", default=1e-4, type=float,
+    parser.add_argument("--learning_rate", "-lr", default=1e-5, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")
@@ -109,10 +108,8 @@ def parse_args():
                         help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm.")
-    parser.add_argument("--folds", type=int, default=5, help="folds")
+    parser.add_argument("--folds", type=int, default=10, help="folds")
     parser.add_argument("--patience", type=int, default=100, help="patience")
-    parser.add_argument(
-        "--return_class", action="store_true", help="return class")
 
     # Source related arguments
     parser.add_argument("--source_model", type=str,
@@ -127,6 +124,10 @@ def parse_args():
                         default="conv1d", help="events model type")
     parser.add_argument("--event_window_size", type=int,
                         default=10, help="event window size")
+    parser.add_argument("--event_l1", type=int, default=128, help="event l1")
+    parser.add_argument("--event_l2", type=int, default=64, help="event l1")
+    parser.add_argument("--event_l3", type=int, default=32, help="event l1")
+    parser.add_argument("--event_l4", type=int, default=16, help="event l1")
 
     # Code related arguments
     parser.add_argument("--code_merge_file",
@@ -485,21 +486,29 @@ def main(args):
         tokenizer = get_tokenizer(
             args, args.code_model_type, args.code_tokenizer_name)
         dataset = TextDataset(tokenizer, args, mall,
-                              mall.keys(), args.code_embedding_type)
+                              mall.keys(), args.code_embedding_type, balance=True)
+        args.return_class = True
+
 
     elif args.source_model == "Message":
         tokenizer = get_tokenizer(
             args, args.message_model_type, args.message_tokenizer_name)
         dataset = TextDataset(tokenizer, args, mall,
-                              mall.keys(), args.message_embedding_type)
+                              mall.keys(), args.message_embedding_type, balance=True)
+        args.return_class = True
+
 
     elif args.source_model == "Events":
         tokenizer = None
-        dataset = EventsDataset(args, mall, mall.keys(), "train")
+        dataset = EventsDataset(args, mall, mall.keys(),  balance=True)
+        args.xshape1 = dataset[0][0].shape[0]
+        args.xshape2 = dataset[0][0].shape[1]
+        args.return_class = True
 
     elif args.source_model == "Multi":
         tokenizer = None
         dataset = get_multi_dataset(args, mall)
+        args.return_class = False
     else:
         raise NotImplementedError
 
