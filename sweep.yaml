@@ -1,0 +1,43 @@
+program: msd.py
+method: bayes
+metric:
+  name: eval_acc
+  goal: maximize
+parameters:
+  learning_rate:
+    values: [1e-3, 1e-4, 1e-5]
+
+  event_window_size:
+    min: 10
+    max: 30
+
+  dropout:
+    min: 0.2
+    max: 0.8
+
+  eval_batch_size:
+    value: 16
+
+  train_batch_size:
+    value: 16
+
+  source_model:
+    value: Events
+  
+  folds:
+    value: 10
+
+  patience:
+    value: 100
+
+  event_l1:
+    values: [16,32,64,128]
+
+  event_l2:
+    values: [16,32,64,128]
+
+  event_l3:
+    values: [16,32,64,128]
+    
+  event_l4:
+    values: [16,32,64,128]

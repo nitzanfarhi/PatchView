@@ -28,10 +28,10 @@ def get_benign_commits(repo, security_commits):
         if commit in security_commits:
             continue
 
-        pydriller_commit = get_commit_from_repo(cur_repo, commit)
-        if len(pydriller_commit.modified_files) == 0:
-            continue
-        
+        # pydriller_commit = get_commit_from_repo(cur_repo, commit)
+        # if len(pydriller_commit.modified_files) == 0:
+        #     continue
+
         yield commit
     return
 
@@ -116,16 +116,17 @@ def main():
         mall[row[3]] = {"label": row[2], "repo": row[0]}
 
     new_mall = {}
-    repo_set = set()
+    repo_set = dict()
     counter = 0
     for a, b in tqdm(mall.items()):
         counter += 1
         new_mall[a] = b
-
-        commit = get_benign_commits(b['repo'], mall.keys())
+        if b['repo'] not in repo_set:
+            commit = get_benign_commits(b['repo'], mall.keys())
+            repo_set[b['repo']] = commit
         for _ in range(2):
             try:
-                commit_hash = next(commit)
+                commit_hash = next(repo_set[b['repo']])
                 if commit_hash in new_mall:
                     print(f"Already found {commit_hash}-{b['repo']}-{0}")
                     continue

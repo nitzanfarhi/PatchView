@@ -16,17 +16,6 @@ from urllib.parse import urlparse
 from git2json import *
 from datetime import datetime
 
-logging.basicConfig(
-    filename='last_run.log',
-    filemode='w',
-    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-    datefmt='%H:%M:%S',
-    level=logging.DEBUG)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-logger.addHandler(logging.StreamHandler())
 
 GITHUB_ARCHIVE_DIRNAME = "gharchive"
 gh_cve_dir = "gh_cve_proccessed"

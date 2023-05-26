@@ -1,16 +1,16 @@
-import difflib
-import json
-import logging
-import os
-import pickle
-import pandas as pd
-import torch
-from tqdm import tqdm
-from data_utils import fix_repo_idx, fix_repo_shape, get_event_window
-from torch.utils.data import Dataset, DataLoader
-
 from misc import add_metadata
+from torch.utils.data import Dataset, DataLoader
+from data_utils import fix_repo_idx, fix_repo_shape, get_event_window
+from tqdm import tqdm
+import torch
+import pandas as pd
+import pickle
+import os
+import json
+import difflib
+import logging
 logger = logging.getLogger(__name__)
+
 
 # files bigger than that will be ignored as they are probably binaries / not code
 MAXIMAL_FILE_SIZE = 100000
@@ -26,7 +26,7 @@ DELETE_TOKEN = '[DEL]'
 
 class TextDataset(Dataset):
 
-    def __init__(self, tokenizer, args, all_json, keys, embedding_type):
+    def __init__(self, tokenizer, args, all_json, keys, embedding_type, balance=False):
         logger.warning(f"Loading dataset")
         self.tokenizer = tokenizer
         self.args = args
@@ -61,7 +61,8 @@ class TextDataset(Dataset):
         self.commit_list = sorted(self.commit_list, key=lambda x: x['hash'])
         logger.warning(f"Number of commits: {len(self.commit_list)}")
         self.create_final_list()
-        # self.balance_data()
+        if balance == True:
+            self.balance_data()
 
     def balance_data(self):
         pos_idxs = []
@@ -237,8 +238,10 @@ class MyConcatDataset(torch.utils.data.Dataset):
 
         in_counter = 0
         code_hash_list = [x["hash"] for x in code_dataset.final_commit_info]
-        message_hash_list = [x["hash"] for x in message_dataset.final_commit_info]
-        events_hash_list = [x["hash"] for x in events_dataset.final_commit_info]
+        message_hash_list = [x["hash"]
+                             for x in message_dataset.final_commit_info]
+        events_hash_list = [x["hash"]
+                            for x in events_dataset.final_commit_info]
         assert sorted(code_hash_list) == code_hash_list
         assert sorted(message_hash_list) == message_hash_list
         assert sorted(events_hash_list) == events_hash_list
@@ -265,9 +268,11 @@ class MyConcatDataset(torch.utils.data.Dataset):
             else:
                 events_counter += 1
 
-        logger.warning("Number of merged samples before balancing: "+str(len(self.merged_dataset)))
+        logger.warning(
+            "Number of merged samples before balancing: "+str(len(self.merged_dataset)))
         self.balance_dataset()
-        logger.warning("Number of merged samples after balancing: "+str(len(self.merged_dataset)))
+        logger.warning("Number of merged samples after balancing: " +
+                       str(len(self.merged_dataset)))
 
     def balance_dataset(self):
         pos_idxs = []
@@ -436,15 +441,11 @@ def handle_commit(commit, tokenizer, args, embedding_type='concat'):
 
 
 class EventsDataset(Dataset):
-    def __init__(self, args, all_json, keys):
+    def __init__(self, args, all_json, keys, balance=False):
         self.args = args
         self.backs = args.event_window_size
-        self.positive_x_set = []
-        self.positive_info = []
-        self.negative_x_set = []
-        self.negative_info = []
-        self.x_set = []
-        self.y_set = []
+        self.final_list_tensors = []
+        self.final_list_labels = []
         self.final_commit_info = []
 
         self.current_path = os.path.join(
@@ -456,15 +457,19 @@ class EventsDataset(Dataset):
 
         if self.cache and os.path.exists(self.current_path):
             logger.warning(f"Loading from cache - {self.current_path}")
-            x_set, y_set, final_commit_info = torch.load(self.current_path)
-            self.x_set = x_set
-            self.y_set = y_set
+            final_list_tensors, final_list_labels, final_commit_info = torch.load(
+                self.current_path)
+            self.final_list_tensors = final_list_tensors
+            self.final_list_labels = final_list_labels
             self.final_commit_info = final_commit_info
         else:
             logger.warning(f"Creating from scratch - {self.current_path}")
             self.create_list_of_hashes(all_json)
-            torch.save((self.x_set, self.y_set,
+            torch.save((self.final_list_tensors, self.final_list_labels,
                        self.final_commit_info), self.current_path)
+
+        if balance == True:
+            self.balance_data()
 
     def create_list_of_hashes(self, all_json):
         repo_dict = {}
@@ -502,20 +507,46 @@ class EventsDataset(Dataset):
                     self.timezones_path, all_metadata, event_window, repo_name)
                 event_window = event_window.drop(["Hash", "Vuln"], axis=1)
                 event_window = event_window.fillna(0)
-                self.x_set.append(event_window.values)
-                self.y_set.append(label)
-                self.final_commit_info.append({"name": repo_name, "hash": mhash, "label": label})
+                self.final_list_tensors.append(event_window.values)
+                self.final_list_labels.append(label)
+                self.final_commit_info.append(
+                    {"name": repo_name, "hash": mhash, "label": label})
 
             except KeyError as e:
                 print(e)
 
+    def balance_data(self):
+        pos_idxs = []
+        neg_idxs = []
+
+        for i, label in enumerate(self.final_list_labels):
+            if label == 1:
+                pos_idxs.append(i)
+            else:
+                neg_idxs.append(i)
+        min_idxs = min(len(pos_idxs), len(neg_idxs))
+        pos_idxs = pos_idxs[:min_idxs]
+        neg_idxs = neg_idxs[:min_idxs]
+
+        tmp_final_list_tensors = []
+        tmp_final_list_labels = []
+        tmp_final_commit_info = []
+        for i in range(len(self.final_list_labels)):
+            if i in pos_idxs or i in neg_idxs:
+                tmp_final_list_tensors.append(self.final_list_tensors[i])
+                tmp_final_list_labels.append(self.final_list_labels[i])
+                tmp_final_commit_info.append(self.final_commit_info[i])
+
+        self.final_list_tensors = tmp_final_list_tensors
+        self.final_list_labels = tmp_final_list_labels
+        self.final_commit_info = tmp_final_commit_info
 
     def __len__(self):
-        return len(self.x_set)
+        return len(self.final_list_tensors)
 
     def __getitem__(self, idx):
-        item = self.x_set[idx]
-        label = self.y_set[idx]
+        item = self.final_list_tensors[idx]
+        label = self.final_list_labels[idx]
         item = torch.from_numpy(item.astype(float)).float()
         return item, label
 

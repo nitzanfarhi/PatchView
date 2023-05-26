@@ -1,8 +1,10 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from transformers import RobertaModel, RobertaTokenizer
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch.nn.functional as F
 from transformers.models.roberta.modeling_roberta import RobertaClassificationHead
-import logging
 import torch
 import torch.nn as nn
 
@@ -23,8 +25,6 @@ MODEL_CLASSES = {
     'roberta_classification': (RobertaConfig, RobertaModel, RobertaTokenizer)
 }
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class PoolerClassificationHead(RobertaClassificationHead):
@@ -285,10 +285,9 @@ class Conv1DTune(nn.Module):
 def get_events_model(args):
     xshape1 = args.xshape1
     xshape2 = args.xshape2
-    events_config = {'l1': 64, 'l2': 64, 'l3': 64, 'l4': 64}
     if args.events_model_type == "conv1d":
         model = Conv1DTune(args,
-                           xshape1, xshape2, l1=events_config["l1"], l2=events_config["l2"], l3=events_config["l3"], l4=events_config["l4"])
+                           xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3, l4=args.event_l4)
     elif args.events_model_type == "lstm":
         logger.warning(f"shapes are {xshape1}, {xshape2}")
         model = LSTM(args, xshape1, xshape2)
@@ -319,7 +318,7 @@ def get_multi_model(args):
 
 
 def get_model(args, dataset, tokenizer):
-    if args.source_model == "Code" or args.source_model == "Message":
+    if args.source_model == "Code":
         model = get_code_model(args)
         model.encoder.resize_token_embeddings(len(tokenizer))
 
@@ -328,7 +327,7 @@ def get_model(args, dataset, tokenizer):
         model.encoder.resize_token_embeddings(len(tokenizer))
 
     elif args.source_model == "Events":
-        model = get_events_model(args, dataset)
+        model = get_events_model(args)
 
     elif args.source_model == "Multi":
         model = get_multi_model(args)
