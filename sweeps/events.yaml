@@ -27,9 +27,15 @@ parameters:
   folds:
     value: 10
 
-  patience:
-    value: 100
+  run_fold:
+    values: [0,1,2,3,4,5,6,7,8,9]
 
+  patience:
+    value: 50
+
+  epochs:
+    value: 400
+    
   event_l1:
     values: [16,32,64,128]
 
@@ -38,6 +44,9 @@ parameters:
 
   event_l3:
     values: [16,32,64,128]
-    
+
   event_l4:
     values: [16,32,64,128]
+
+  batch_size:
+    values: [16,32,64,128,256,512]

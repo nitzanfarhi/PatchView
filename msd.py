@@ -94,10 +94,8 @@ def parse_args():
                         help="number of epochs to train")
     parser.add_argument('--pooler_type', type=str,
                         default="cls", help="poller type")
-    parser.add_argument("--train_batch_size", default=64, type=int,
+    parser.add_argument("--batch_size", default=64, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=64, type=int,
-                        help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", "-lr", default=1e-5, type=float,
@@ -109,6 +107,7 @@ def parse_args():
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm.")
     parser.add_argument("--folds", type=int, default=10, help="folds")
+    parser.add_argument("--run_fold", type=int, default=-1, help="run_fold")
     parser.add_argument("--patience", type=int, default=100, help="patience")
 
     # Source related arguments
@@ -462,8 +461,11 @@ def main(args):
     if args.n_gpu == 0:
         args.n_gpu = 1
 
-    args.per_gpu_train_batch_size = args.train_batch_size//args.n_gpu
-    args.per_gpu_eval_batch_size = args.eval_batch_size//args.n_gpu
+    args.eval_batch_size = args.batch_size
+    args.train_batch_size = args.batch_size
+    
+    args.per_gpu_train_batch_size = args.batch_size//args.n_gpu
+    args.per_gpu_eval_batch_size = args.batch_size//args.n_gpu
     # Setup logging
     logger.warning(f"Device: {device}, n_gpu: {args.n_gpu}")
 
@@ -517,6 +519,9 @@ def main(args):
 
     best_accs = []
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+        if args.run_fold != -1 and args.run_fold != fold:
+            continue
+
         print('Fold {}'.format(fold + 1))
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args, name=f"{args.source_model}_{fold}") as run:
             model = get_model(args, dataset, tokenizer)
