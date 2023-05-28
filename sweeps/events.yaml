@@ -3,23 +3,23 @@ method: bayes
 metric:
   name: eval_acc
   goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 100
+  eta: 2
+
 parameters:
   learning_rate:
     values: [1e-3, 1e-4, 1e-5]
 
   event_window_size:
-    min: 10
-    max: 30
+    min: 5
+    max: 50
 
   dropout:
     min: 0.2
     max: 0.8
-
-  eval_batch_size:
-    value: 16
-
-  train_batch_size:
-    value: 16
 
   source_model:
     value: Events
@@ -30,23 +30,24 @@ parameters:
   run_fold:
     values: [0,1,2,3,4,5,6,7,8,9]
 
-  patience:
-    value: 50
-
   epochs:
-    value: 400
+    value: 600
     
   event_l1:
-    values: [16,32,64,128]
+    min: 16
+    max: 128
 
   event_l2:
-    values: [16,32,64,128]
+    min: 16
+    max: 128
 
   event_l3:
-    values: [16,32,64,128]
+    min: 16
+    max: 128
 
   event_l4:
-    values: [16,32,64,128]
+    min: 16
+    max: 128
 
   batch_size:
     values: [16,32,64,128,256,512]

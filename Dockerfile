@@ -20,4 +20,4 @@ COPY cache_data/models cache_data/models
 COPY cache_data/message/* cache_data/message/
 COPY cache_data/code/* cache_data/code/
 COPY *.py ./
-COPY sweep.yaml ./
+COPY sweeps/* sweeps/

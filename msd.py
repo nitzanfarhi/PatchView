@@ -40,22 +40,6 @@ MODEL_CLASSES = {
 }
 
 
-class EarlyStopper:
-    def __init__(self, patience=1, min_delta=0):
-        self.patience = patience
-        self.min_delta = min_delta
-        self.counter = 0
-        self.min_validation_loss = np.inf
-
-    def early_stop(self, validation_loss):
-        if validation_loss < self.min_validation_loss:
-            self.min_validation_loss = validation_loss
-            self.counter = 0
-        elif validation_loss > (self.min_validation_loss + self.min_delta):
-            self.counter += 1
-            if self.counter >= self.patience:
-                return True
-        return False
 
 
 def parse_args():
@@ -108,7 +92,7 @@ def parse_args():
                         help="Max gradient norm.")
     parser.add_argument("--folds", type=int, default=10, help="folds")
     parser.add_argument("--run_fold", type=int, default=-1, help="run_fold")
-    parser.add_argument("--patience", type=int, default=100, help="patience")
+    parser.add_argument("--balance_factor", type=float, default=1.0, help="balance_factor")
 
     # Source related arguments
     parser.add_argument("--source_model", type=str,
@@ -298,7 +282,6 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
     model.zero_grad()
 
-    early_stopper = EarlyStopper(patience=args.patience, min_delta=0)
 
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
         bar = tqdm(train_dataloader, total=len(train_dataloader))
@@ -350,10 +333,6 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         f"train_loss {final_train_loss}")
                     logger.warning(
                         f"eval_acc {round(results['eval_acc'],4)}")
-
-                    if early_stopper.early_stop(results['eval_acc']):
-                        logger.info("Early stopping")
-                        return best_acc
 
                     if results['eval_acc'] > best_acc:
                         best_acc = results['eval_acc']
@@ -463,7 +442,7 @@ def main(args):
 
     args.eval_batch_size = args.batch_size
     args.train_batch_size = args.batch_size
-    
+
     args.per_gpu_train_batch_size = args.batch_size//args.n_gpu
     args.per_gpu_eval_batch_size = args.batch_size//args.n_gpu
     # Setup logging
@@ -522,14 +501,15 @@ def main(args):
         if args.run_fold != -1 and args.run_fold != fold:
             continue
 
-        print('Fold {}'.format(fold + 1))
-        with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args, name=f"{args.source_model}_{fold}") as run:
+        logger.warning('Running Fold {}'.format(fold + 1))
+        with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
             model = get_model(args, dataset, tokenizer)
             run.define_metric("epoch")
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
             best_accs.append(best_acc)
             test(args, model, dataset, val_idx, fold=fold)
+            wandb.log({f"best_acc": max(best_acc)})
 
             if fold == args.folds - 1:
                 wandb.alert(title="Finished last run",
