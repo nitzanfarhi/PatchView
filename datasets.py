@@ -526,7 +526,7 @@ class EventsDataset(Dataset):
                 neg_idxs.append(i)
         min_idxs = min(len(pos_idxs), len(neg_idxs))
         pos_idxs = pos_idxs[:min_idxs]
-        neg_idxs = neg_idxs[:min_idxs * self.args.balance_factor]
+        neg_idxs = neg_idxs[: int(min_idxs * self.args.balance_factor)]
 
         tmp_final_list_tensors = []
         tmp_final_list_labels = []

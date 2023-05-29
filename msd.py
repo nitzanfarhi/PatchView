@@ -71,6 +71,8 @@ def parse_args():
 
     parser.add_argument('--commit_repos_path', type=str,
                         default=r"D:\multisource\commits")
+    
+    parser.add_argument('--hidden_size', type=int, default=768)
 
     # Training parameters
     parser.add_argument('--dropout', type=float, default=0.1, help="dropout")
@@ -90,6 +92,7 @@ def parse_args():
                         help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm.")
+    parser.add_argument("--activation", default="tanh", type=str, help="activation")
     parser.add_argument("--folds", type=int, default=10, help="folds")
     parser.add_argument("--run_fold", type=int, default=-1, help="run_fold")
     parser.add_argument("--balance_factor", type=float, default=1.0, help="balance_factor")
@@ -430,6 +433,17 @@ def get_tokenizer(args, model_type, tokenizer_name):
     args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
     return tokenizer
 
+def define_activation(args):
+    if args.activation == "tanh":
+        args.activation = torch.nn.Tanh()
+    elif args.activation == "relu":
+        args.activation = torch.nn.ReLU()
+    elif args.activation == "sigmoid":
+        args.activation = torch.nn.Sigmoid()
+    elif args.activation == "leakyrelu":
+        args.activation = torch.nn.LeakyReLU()
+    else:
+        raise NotImplementedError
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available()
@@ -459,6 +473,8 @@ def main(args):
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
 
     logger.warning("Training/evaluation parameters %s", args)
+
+    define_activation(args)
 
     with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)

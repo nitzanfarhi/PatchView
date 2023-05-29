@@ -26,48 +26,34 @@ MODEL_CLASSES = {
 }
 
 
-
-class PoolerClassificationHead(RobertaClassificationHead):
-    """Head for sentence-level classification tasks."""
-
-    def __init__(self, config, pooler_type="cls", pooler_dropout=0.3):
-        super().__init__(config)
-        self.pooler_type = pooler_type
-        self.dropout = nn.Dropout(p=pooler_dropout)
-
-    def forward(self, features, attention_mask=None):
-        if self.pooler_type == "cls":
-            features = features[:, 0]
-        elif self.pooler_type == "avg" and attention_mask is not None:
-            features = (features * attention_mask.unsqueeze(-1)
-                        ).sum(axis=-2) / attention_mask.sum(axis=-1).unsqueeze(-1)
+class RecurrentModels(nn.Module):
+    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256, l4=64):
+        super(RecurrentModels, self).__init__()
+        if args.events_model_type == "lstm":
+            self.model_type = nn.LSTM
+        elif args.events_model_type == "gru":
+            self.model_type = nn.GRU
         else:
             raise NotImplementedError
-        x = self.dropout(features)
-        x = self.dense(x)
-        x = torch.tanh(x)
-        x = self.dropout(x)
-        x = self.out_proj(x)
-        return x
-
-
-class LSTM(nn.Module):
-
-    def __init__(self, args, xshape1, xshape2):
-        super(LSTM, self).__init__()
-        self.lstm1 = nn.LSTM(xshape2, 100, batch_first=True)
-        self.lstm2 = nn.LSTM(100, 50, batch_first=True)
-        self.lstm3 = nn.LSTM(50, 25, batch_first=True)
-        self.lstm4 = nn.LSTM(25, 12, batch_first=True)
+        self.args = args
+        self.layer1 = self.model_type(xshape2, l1, batch_first=True)
+        self.layer2 = self.model_type(l1, l2, batch_first=True)
+        self.layer3 = self.model_type(l2, l3, batch_first=True)
+        self.layer4 = self.model_type(l3, l4, batch_first=True)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.fc = nn.Linear(12, 2)
+        self.fc = nn.Linear(l4, 2)
+        self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels):
-        x, (h, c) = self.lstm1(x)
-        x, (h, c) = self.lstm2(x)
-        x, (h, c) = self.lstm3(x)
-        x, (h, c) = self.lstm4(x)
+        x, (h, c) = self.layer1(x)
+        x = self.activation(x)
+        x, (h, c) = self.layer2(x)
+        x = self.activation(x)
+        x, (h, c) = self.layer3(x)
+        x = self.activation(x)
+        x, (h, c) = self.layer4(x)
+        x = self.activation(x)
         x = self.fc(x[:, -1])
         x = self.sigmoid(x)
 
@@ -81,90 +67,36 @@ class LSTM(nn.Module):
         return loss, x
 
 
-class RobertaClassificationModel(nn.Module):
-    def __init__(self, encoder, config, tokenizer, args):
-        super(RobertaClassificationModel, self).__init__()
-        self.encoder = encoder
-        self.config = config
-        self.num_labels = config.num_labels
-        self.tokenizer = tokenizer
-        self.classifier = RobertaClassificationHead(config)
-        self.args = args
-
-    def forward(self, input_ids=None, labels=None):
-
-        attention_mask = input_ids.ne(1)
-        outputs = self.encoder(input_ids=input_ids,
-                               attention_mask=attention_mask)
-        sequence_output = outputs[0]
-        logits = self.classifier(sequence_output)
-        outputs = (logits,) + outputs[2:]
-
-        if labels is not None:
-            if self.num_labels == 1:
-                #  We are doing regression
-                loss_fct = MSELoss()
-                loss = loss_fct(logits.view(-1), labels.view(-1))
-            else:
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(
-                    logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
-
-        return outputs  # (loss), logits, (hidden_states), (attentions)
-
-
-class CustomRoberta(nn.Module):
-    def __init__(self, model, args):
-        super(CustomRoberta, self).__init__()
-        self.encoder = model
-        # New layers:
-        self.linear1 = nn.Linear(768, 256)
-        # 3 is the number of classes in this example
-        self.linear2 = nn.Linear(256, 2)
-        self.args = args
-
-    def forward(self, input_ids=None, labels=None):
-        attention_mask = input_ids.ne(1)
-
-        res = self.encoder(input_ids, attention_mask=attention_mask)
-
-        # extract the 1st token's embeddings
-        linear1_output = self.linear1(res[0][:, 0, :].view(-1, 768))
-        linear2_output = self.linear2(linear1_output)
-        return linear2_output
-
-
 class RobertaClass(torch.nn.Module):
     def __init__(self, l1, args):
         super(RobertaClass, self).__init__()
         self.encoder = l1
+        self.args = args
         self.hidden_size = self.encoder.config.hidden_size
-        self.pre_classifier = torch.nn.Linear(
-            self.hidden_size, self.hidden_size)
         self.dropout = torch.nn.Dropout(args.dropout)
-        self.relu = torch.nn.ReLU()
-        self.classifier = torch.nn.Linear(self.hidden_size, 2)
+        self.activation = args.activation
+        self.linear1 = torch.nn.Linear(self.hidden_size, self.args.hidden_size)
+        self.linear2 = torch.nn.Linear(self.args.hidden_size, 2)
         self.args = args
 
     def forward(self, input_ids, labels=None):
         attention_mask = input_ids.ne(1)
-        output_1 = self.encoder(input_ids=input_ids,
+        sequence_output, pooled_output = self.encoder(input_ids=input_ids,
                                 attention_mask=attention_mask)
 
         if self.args.pooler_type == "cls":
-            hidden_state = output_1[1]
-        elif self.args.pooler_type == "avg":
-            hidden_state = (output_1[0] * attention_mask.unsqueeze(-1)
-                            ).sum(axis=-2) / attention_mask.sum(axis=-1).unsqueeze(-1)
+          pooler = self.linear1(sequence_output[:,0,:].view(-1,768)) ## extract the 1st token's embeddings
 
-        pooler = self.pre_classifier(hidden_state)
+        elif self.args.pooler_type == "avg":
+            raise NotImplementedError
+
+        pooler = self.activation(pooler)
+        pooler = self.dropout(pooler)
+
         if self.args.source_model == "Multi" and not self.args.return_class:
             return pooler
-        pooler = self.relu(pooler)
-
-        pooler = self.dropout(pooler)
-        logits = self.classifier(pooler)
+        
+        logits = self.linear2(pooler)
         prob = torch.sigmoid(logits)
         if labels is not None:
             labels = labels.float()
@@ -175,29 +107,6 @@ class RobertaClass(torch.nn.Module):
         else:
             return prob
 
-
-class Model(nn.Module):
-    def __init__(self, encoder, config, args):
-        super(Model, self).__init__()
-        self.encoder = encoder
-        self.config = config
-        self.args = args
-
-    def forward(self, input_ids=None, labels=None):
-        outputs = self.encoder(input_ids, attention_mask=input_ids.ne(1))[0]
-        logits = outputs
-        if self.args.source_model == "Multi" and not self.args.return_class:
-            return logits
-
-        prob = torch.sigmoid(logits)
-        if labels is not None:
-            labels = labels.float()
-            loss = torch.log(prob[:, 0]+1e-10)*labels + \
-                torch.log((1-prob)[:, 0]+1e-10)*(1-labels)
-            loss = -loss.mean()
-            return loss, prob
-        else:
-            return prob
 
 
 class MultiModel(nn.Module):
@@ -208,7 +117,9 @@ class MultiModel(nn.Module):
         self.events_model = events_model
         self.args = args
         self.dropout = nn.Dropout(args.dropout)
-        self.classifier = nn.Linear(args.hidden_size * 3, 2)
+        self.classifier1 = nn.Linear(args.hidden_size * 3, 64)
+        self.classifier2 = nn.Linear(args.hidden_size * 64, args.hidden_size)
+        self.activation = nn.Tanh()
 
     def forward(self, data, labels=None):
         code, message, events = data
@@ -217,9 +128,12 @@ class MultiModel(nn.Module):
         events = self.events_model(events)
         x = torch.stack([code, message, events], dim=1)
         x = x.reshape(code.shape[0], -1)
-        x = self.dropout(x)
-        logits = self.classifier(x)
-        prob = torch.sigmoid(logits)
+        x = self.classifier1(x)
+        x = self.activation(x)
+
+        x = self.classifier2(x)
+        x = self.activation(x)
+        prob = torch.sigmoid(x)
         if labels is not None:
             labels = labels.float()
             loss = torch.log(prob[:, 0]+1e-10)*labels + \
@@ -230,9 +144,9 @@ class MultiModel(nn.Module):
             return prob
 
 
-class Conv1DTune(nn.Module):
+class Conv1D(nn.Module):
     def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256, l4=64):
-        super(Conv1DTune, self).__init__()
+        super(Conv1D, self).__init__()
         self.args = args
         self.xshape1 = xshape1
         self.xshape2 = xshape2
@@ -250,7 +164,8 @@ class Conv1DTune(nn.Module):
             self.fc2 = nn.Linear(l1, l3)
         self.fc3 = nn.Linear(l3, l4)
         self.fc4 = nn.Linear(l4, 2)
-        self.activation = nn.Tanh()
+
+        self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels=None):
@@ -286,13 +201,11 @@ def get_events_model(args):
     xshape1 = args.xshape1
     xshape2 = args.xshape2
     if args.events_model_type == "conv1d":
-        model = Conv1DTune(args,
+        model = Conv1D(args,
                            xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3, l4=args.event_l4)
-    elif args.events_model_type == "lstm":
+    elif args.events_model_type == "lstm" or args.events_model_type == "gru":
         logger.warning(f"shapes are {xshape1}, {xshape2}")
-        model = LSTM(args, xshape1, xshape2)
-    elif args.events_model_type == "gru":
-        raise NotImplementedError
+        model = RecurrentModels(args, xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3, l4=args.event_l4)
     else:
         raise NotImplementedError
 
@@ -356,7 +269,7 @@ def get_message_model(args):
         model = RobertaClass(model, args)
         logger.warning("Using RobertaClass")
     else:
-        model = Model(model, config, args)
+        raise NotImplementedError
     return model
 
 
@@ -382,5 +295,5 @@ def get_code_model(args):
         model = RobertaClass(model, args)
         logger.warning("Using RobertaClass")
     else:
-        model = Model(model, config, args)
+        raise NotImplementedError
     return model
