@@ -81,8 +81,9 @@ class RobertaClass(torch.nn.Module):
 
     def forward(self, input_ids, labels=None):
         attention_mask = input_ids.ne(1)
-        sequence_output, pooled_output = self.encoder(input_ids=input_ids,
-                                attention_mask=attention_mask)
+        outputs  = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        
+        sequence_output = self.dropout(outputs[0]) #outputs[0]=last hidden state
 
         if self.args.pooler_type == "cls":
           pooler = self.linear1(sequence_output[:,0,:].view(-1,768)) ## extract the 1st token's embeddings
@@ -145,47 +146,43 @@ class MultiModel(nn.Module):
 
 
 class Conv1D(nn.Module):
-    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256, l4=64):
+    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=64, l4=64):
         super(Conv1D, self).__init__()
         self.args = args
         self.xshape1 = xshape1
         self.xshape2 = xshape2
 
-        self.conv = nn.Conv1d(xshape1, l2, kernel_size=2)
-        self.batchnorm1 = nn.BatchNorm1d(l2)
-        self.batchnorm2 = nn.BatchNorm1d(l1)
-
-        self.pool = nn.MaxPool1d(kernel_size=2)
+        self.conv1d = nn.Conv1d(xshape1, xshape2, kernel_size=2 )
+        self.max_pooling = nn.MaxPool1d(kernel_size=2)
+        self.flatten = nn.Flatten()
+        self.dense1 = nn.Linear(self.xshape1 *self.xshape2 * 10, l1)
+        self.dense2 = nn.Linear(l1, l2)
+        self.dense3 = nn.Linear(l2, l3)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.fc1 = nn.Linear(l2 * ((self.xshape2 // 2)), l1)
-        if not args.return_class:
-            self.fc2 = nn.Linear(l1, args.hidden_size)
-        else:
-            self.fc2 = nn.Linear(l1, l3)
-        self.fc3 = nn.Linear(l3, l4)
-        self.fc4 = nn.Linear(l4, 2)
-
         self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels=None):
-        x = self.activation(self.conv(x))
-        x = self.batchnorm1(x)
-        x = self.pool(x)
-        x = x.view(x.size(0), -1)
-        x = self.activation(self.fc1(x))
-        x = self.batchnorm2(x)
-
+        x = self.conv1d(x)
+        x = self.activation(x)
+        x = self.max_pooling(x)
+        x = self.flatten(x)
+        x = self.dense1(x)
         x = self.dropout(x)
-        x = self.activation(self.fc2(x))
+        x = self.activation(x)
+        
+        x = self.dense2(x)
+        x = self.dropout(x)
+        x = self.activation(x)
+
+        x = self.dense3(x)
+        x = self.activation(x)
+        x = self.dropout(x)
         if self.args.source_model == "Multi" and not self.args.return_class:
             # Returning for the multimodel to
             return x
-        x = self.dropout(x)
-        x = self.activation(self.fc3(x))
 
-        x = self.dropout(x)
-        x = self.sigmoid(self.fc4(x))
+        x = self.sigmoid(x)
 
         if labels is None:
             return x
@@ -237,7 +234,6 @@ def get_model(args, dataset, tokenizer):
 
     elif args.source_model == "Message":
         model = get_message_model(args)
-        model.encoder.resize_token_embeddings(len(tokenizer))
 
     elif args.source_model == "Events":
         model = get_events_model(args)
@@ -266,10 +262,10 @@ def get_message_model(args):
     if args.message_model_type == "roberta_classification":
         config.hidden_dropout_prob = args.dropout
         config.attention_probs_dropout_prob = args.dropout
-        model = RobertaClass(model, args)
+        model = CustomBERTModel(args)
         logger.warning("Using RobertaClass")
-    else:
-        raise NotImplementedError
+    elif args.message_model_type == "roberta":
+        model = XGlueModel(model, args)
     return model
 
 
@@ -297,3 +293,76 @@ def get_code_model(args):
     else:
         raise NotImplementedError
     return model
+
+
+
+class CustomBERTModel(nn.Module):
+    def __init__(self, args):
+        super(CustomBERTModel, self).__init__()
+        self.bert = RobertaModel.from_pretrained(args.message_model_name)
+        ### New layers:
+        self.linear1 = nn.Linear(768, self.args.message_l1)
+        self.linear2 = nn.Linear(self.args.message_l1, self.args.message_l2)
+        self.linear3 = nn.Linear(self.args.message_l2, self.args.message_l3)
+        self.linear4 = nn.Linear(self.args.message_l3, self.args.message_l4)
+        self.linear2 = nn.Linear(self.args.message_l4, 2) ## 3 is the number of classes in this example
+        self.args = args
+        self.sigmoid = nn.Sigmoid()
+        self.activation = self.args.activation
+        self.dropout = nn.Dropout(p=args.dropout)
+
+    def forward(self, input_ids, labels=None):
+        attention_mask = input_ids.ne(1)
+        sequence_output, pooled_output = self.bert(input_ids, attention_mask=attention_mask)
+
+        # sequence_output has the following shape: (batch_size, sequence_length, 768)
+        x = self.linear1(sequence_output[:,0,:].view(-1,768)) ## extract the 1st token's embeddings
+        x = self.activation(x)
+        x = self.dropout(x)
+        
+        x = self.linear2(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        x = self.linear3(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        x = self.linear4(x)
+
+        if self.args.source_model == "Multi" and not self.args.return_class:
+            # Returning for the multimodel to
+            return x
+
+        x = self.sigmoid(x)
+
+        if labels is None:
+            return x
+        labels = labels.float()
+        loss = torch.log(x[:, 0]+1e-10)*labels + \
+        torch.log((1-x)[:, 0]+1e-10)*(1-labels)
+        loss = -loss.mean()
+
+        return loss, x
+    
+
+class XGlueModel(nn.Module):   
+    def __init__(self, encoder,args):
+        super(XGlueModel, self).__init__()
+        self.encoder = encoder
+        self.args=args
+    
+        
+    def forward(self, input_ids=None,labels=None): 
+        outputs=self.encoder(input_ids,attention_mask=input_ids.ne(1))[0]
+        logits=outputs
+        prob=torch.sigmoid(logits)
+        if labels is not None:
+            labels=labels.float()
+            loss=torch.log(prob[:,0]+1e-10)*labels+torch.log((1-prob)[:,0]+1e-10)*(1-labels)
+            loss=-loss.mean()
+            return loss,prob
+        else:
+            return prob
+      
+        

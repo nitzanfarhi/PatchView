@@ -181,13 +181,16 @@ class TextDataset(Dataset):
         return final_dict
 
     def create_final_list(self):
+        import gc
         if os.path.exists(self.final_cache_list) and self.cache:
             logger.warning("Get final list from cache")
+            gc.disable()
             with open(self.final_cache_list, 'rb') as f:
                 cached_list = torch.load(f)
                 self.final_commit_info = cached_list["final_commit_info"]
                 self.final_list_tensors = cached_list["final_list_tensors"]
                 self.final_list_labels = cached_list["final_list_labels"]
+            gc.enable()
             return
 
         logger.warning("Create final list")

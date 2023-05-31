@@ -1,12 +1,7 @@
 FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel
 RUN apt update && apt install  openssh-server sudo -y
 RUN useradd -rm -d /home/ubuntu -s /bin/bash -g root -G sudo -u 1000 test 
-
-WORKDIR /storage/nitzan
 RUN  echo 'test:test' | chpasswd
-RUN sudo apt-get install ssh
-RUN sudo service ssh start
-RUN sudo apt install net-tools
 RUN service ssh start
 EXPOSE 22
 
@@ -15,6 +10,7 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 
+WORKDIR /app_home
 
 COPY cache_data/orc/* cache_data/orc/
 COPY cache_data/events/gh_cve_proccessed/*.parquet cache_data/events/gh_cve_proccessed/
@@ -25,5 +21,3 @@ COPY cache_data/message/* cache_data/message/
 COPY cache_data/code/* cache_data/code/
 COPY *.py ./
 COPY sweeps/* sweeps/
-
-

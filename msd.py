@@ -110,10 +110,10 @@ def parse_args():
                         default="conv1d", help="events model type")
     parser.add_argument("--event_window_size", type=int,
                         default=10, help="event window size")
-    parser.add_argument("--event_l1", type=int, default=128, help="event l1")
-    parser.add_argument("--event_l2", type=int, default=64, help="event l1")
-    parser.add_argument("--event_l3", type=int, default=32, help="event l1")
-    parser.add_argument("--event_l4", type=int, default=16, help="event l1")
+    parser.add_argument("--event_l1", type=int, default=1024, help="event l1")
+    parser.add_argument("--event_l2", type=int, default=256, help="event l1")
+    parser.add_argument("--event_l3", type=int, default=64, help="event l1")
+    parser.add_argument("--event_l4", type=int, default=2, help="event l1")
 
     # Code related arguments
     parser.add_argument("--code_merge_file",
@@ -136,6 +136,10 @@ def parse_args():
                         help="The model checkpoint for weights initialization.")
     parser.add_argument("--message_tokenizer_name", default="roberta-base", type=str,
                         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path")
+    parser.add_argument("--message_l1", type=int, default=1024, help="message l1")
+    parser.add_argument("--message_l2", type=int, default=256, help="message l1")
+    parser.add_argument("--message_l3", type=int, default=64, help="message l1")
+    parser.add_argument("--message_l4", type=int, default=2, help="message l1")
 
     return parser.parse_args()
 
@@ -200,7 +204,7 @@ def evaluate(args, model, dataset, eval_idx=None):
         if eval_acc > best_acc:
             best_acc = eval_acc
             best_threshold = i/100
-    logger.info("best threshold: {}".format(best_threshold))
+    logger.warning("best threshold: {}".format(best_threshold))
     result = {
         "eval_loss": float(perplexity),
         "eval_acc": round(best_acc, 4),
@@ -278,6 +282,9 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     logger.info("  Gradient Accumulation steps = %d",
                 args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", args.max_steps)
+
+    run.summary[f"train_examples_{fold}"] = len(idx)
+    run.summary[f"eval_examples_{fold}"] = len(eval_idx)
 
     global_step = args.start_step
     tr_loss, logging_loss, avg_loss, tr_nb, tr_num, train_loss = 0.0, 0.0, 0.0, 0, 0, 0
@@ -427,10 +434,8 @@ def get_tokenizer(args, model_type, tokenizer_name):
     tokenizer = tokenizer_class.from_pretrained(tokenizer_name,
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.model_cache_dir if args.model_cache_dir else None)
-    if args.block_size <= 0:
-        # Our input block size will be the max possible for the model
-        args.block_size = tokenizer.max_len_single_sentence
-    args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+    
+    args.block_size = tokenizer.max_len_single_sentence
     return tokenizer
 
 def define_activation(args):
@@ -444,6 +449,11 @@ def define_activation(args):
         args.activation = torch.nn.LeakyReLU()
     else:
         raise NotImplementedError
+
+def define_message_model_type(args):
+    if args.message_model_name == "roberta-base":
+        args.message_model_type = "roberta"
+    
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available()
@@ -475,9 +485,12 @@ def main(args):
     logger.warning("Training/evaluation parameters %s", args)
 
     define_activation(args)
+    # define_message_model_type(args)
+    # define_code_model_type(args)
 
     with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
+
 
     if args.source_model == "Code":
         tokenizer = get_tokenizer(
@@ -525,7 +538,7 @@ def main(args):
                              train_idx, run, eval_idx=val_idx)
             best_accs.append(best_acc)
             test(args, model, dataset, val_idx, fold=fold)
-            wandb.log({f"best_acc": max(best_acc)})
+            run.summary[f"best_acc"]  = max(best_accs)
 
             if fold == args.folds - 1:
                 wandb.alert(title="Finished last run",
