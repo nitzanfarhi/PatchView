@@ -1,3 +1,10 @@
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--recreate_cache"
+  - ${args}
+
 program: msd.py
 method: bayes
 metric:
@@ -29,7 +36,7 @@ parameters:
     value: 100
 
   batch_size:
-    values: [32,64,128,256]
+    values: [8,16,32]
 
   balance_factor:
     values: [0.5]
