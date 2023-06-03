@@ -396,8 +396,7 @@ def handle_commit(commit, tokenizer, args, embedding_type='concat'):
         if embedding_type == 'sum':
             embed_file_res = embed_file(file, tokenizer, args)
             if embed_file_res is not None:
-                for embed in embed_file_res:
-                    res.append(embed)
+                res += embed_file_res
 
         elif embedding_type == 'simple':
             added = [diff[1] for diff in file['added']]
@@ -450,15 +449,20 @@ def handle_commit(commit, tokenizer, args, embedding_type='concat'):
 
 
     if args.code_merge_file and res != []:
-        added_lst = []
-        deleted_lst = []
-        for added, deleted in res:
-            added_lst += added
-            deleted_lst += deleted
-        file_res = " ".join(added_lst+deleted_lst)
-        file_res = tokenizer(file_res, truncation=True,
-                             padding='max_length', max_length=args.block_size)
-        return [file_res]
+        if embedding_type == 'sum':
+            res = tokenizer(" ".join(res), truncation=True,
+                padding='max_length', max_length=args.block_size)
+            return [res] 
+        else:
+            added_lst = []
+            deleted_lst = []
+            for added, deleted in res:
+                added_lst += added
+                deleted_lst += deleted
+            file_res = " ".join(added_lst+deleted_lst)
+            file_res = tokenizer(file_res, truncation=True,
+                                padding='max_length', max_length=args.block_size)
+            return [file_res]
 
     return res
 
