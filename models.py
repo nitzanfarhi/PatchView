@@ -291,7 +291,7 @@ def get_code_model(args):
         model = RobertaClass(model, args)
         logger.warning("Using RobertaClass")
     else:
-        raise NotImplementedError
+        model = XGlueModel(model, args)
     return model
 
 
