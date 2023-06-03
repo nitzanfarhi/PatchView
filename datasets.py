@@ -352,20 +352,23 @@ def embed_file(file, tokenizer, args):
         elif opp == 'replace':
             res = REP_BEFORE_TOKEN+" " + \
                 before[a1:a2]+" "+REP_AFTER_TOKEN+" "+after[b1:b2]
-            res = tokenizer(res, truncation=True,
-                            padding='max_length', max_length=args.block_size)
+            if not args.code_merge_file:
+                res = tokenizer(res, truncation=True,
+                                padding='max_length', max_length=args.block_size)
             operation_list.append(res)
 
         elif opp == 'insert':
             res = INS_TOKEN + " " + after[b1:b2]
-            res = tokenizer(res, truncation=True,
-                            padding='max_length', max_length=args.block_size)
+            if not args.code_merge_file:
+                res = tokenizer(res, truncation=True,
+                                padding='max_length', max_length=args.block_size)
             operation_list.append(res)
 
         elif opp == 'delete':
             res = DEL_TOKEN + " " + before[a1:a2]
-            res = tokenizer(res, truncation=True,
-                            padding='max_length', max_length=args.block_size)
+            if not args.code_merge_file:
+                res = tokenizer(res, truncation=True,
+                                padding='max_length', max_length=args.block_size)
             operation_list.append(res)
 
         else:
@@ -385,7 +388,11 @@ def get_line_comment(language):
 
 def handle_commit(commit, tokenizer, args, embedding_type='concat'):
     res = []
+    file_counter = 0 
     for file in commit["files"]:
+        if len("".join(['added'])+"".join(['deleted'])) > args.block_size:
+            continue
+        
         if embedding_type == 'sum':
             embed_file_res = embed_file(file, tokenizer, args)
             if embed_file_res is not None:
@@ -395,39 +402,52 @@ def handle_commit(commit, tokenizer, args, embedding_type='concat'):
         elif embedding_type == 'simple':
             added = [diff[1] for diff in file['added']]
             deleted = [diff[1] for diff in file['deleted']]
-            if not args.code_merge_file:
+
+            if args.code_merge_file:
+                res.append((added, deleted))
+            else:
                 file_res = " ".join(added+deleted)
                 file_res = tokenizer(file_res, truncation=True,
                                      padding='max_length', max_length=args.block_size)
                 res.append(file_res)
-            else:
-                res.append((added, deleted))
 
         elif embedding_type == 'simple_with_tokens':
             added = [ADD_TOKEN]+[diff[1]
                                  for diff in file['added']]+[tokenizer.sep_token]
             deleted = [DEL_TOKEN]+[diff[1] for diff in file['deleted']]
-            file_res = " ".join(added+deleted)
-            file_res = tokenizer(file_res, truncation=True,
-                                 padding='max_length', max_length=args.block_size)
-            res.append(file_res)
+
+            if args.code_merge_file:
+                res.append((added, deleted))
+            else: 
+                file_res = " ".join(added+deleted)
+                file_res = tokenizer(file_res, truncation=True,
+                                    padding='max_length', max_length=args.block_size)
+                res.append(file_res)
 
         elif embedding_type == 'simple_with_comments':
             added = [diff[1] for diff in file['added']]
             deleted = [get_line_comment(file["filetype"])+diff[1]
                        for diff in file['deleted']]
-
-            file_res = " \n ".join(added+deleted)
-
-            file_res = tokenizer(file_res, truncation=True,
-                                 padding='max_length', max_length=args.block_size)
-            res.append(file_res)
+            
+            if args.code_merge_file:
+                res.append((added, deleted))
+            else: 
+                file_res = " \n ".join(added+deleted)
+                file_res = tokenizer(file_res, truncation=True,
+                                    padding='max_length', max_length=args.block_size)
+                res.append(file_res)
 
         elif embedding_type == 'commit_message':
             file_res = tokenizer(commit["message"], truncation=True,
                                  padding='max_length', max_length=args.block_size)
             res.append(file_res)
+
+        file_counter +=1
+        
+        # Probably at this point we have too many changes and we should stop
+        if file_counter > args.block_size and args.code_merge_file:
             break
+
 
     if args.code_merge_file and res != []:
         added_lst = []
