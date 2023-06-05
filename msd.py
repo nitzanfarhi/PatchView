@@ -104,6 +104,7 @@ def parse_args():
     # Multi related arguments
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
+    parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
 
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
