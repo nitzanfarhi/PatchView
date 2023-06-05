@@ -157,19 +157,19 @@ class MultiModel(nn.Module):
 
 
 class Conv1D(nn.Module):
-    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=64, l4=64):
+    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=64):
         super(Conv1D, self).__init__()
         self.args = args
         self.xshape1 = xshape1
         self.xshape2 = xshape2
-
+        self.calculate_output_length(length_in=xshape1, kernel_size=2, stride=1, padding=0, dilation=1)
         # todo this is not correct!
-        self.conv1d = nn.Conv1d(xshape1, xshape2, kernel_size=2 )
+        self.conv1d = nn.Conv1d(xshape1, l1, kernel_size=2 )
         self.max_pooling = nn.MaxPool1d(kernel_size=2)
         self.flatten = nn.Flatten()
-        self.dense1 = nn.Linear(self.xshape1 *self.xshape2 * 10, l1)
-        self.dense2 = nn.Linear(l1, l2)
-        self.dense3 = nn.Linear(l2, 2)
+        self.dense1 = nn.Linear(l1*((self.xshape2-1)//2), l2)
+        self.dense2 = nn.Linear(l2, l3)
+        self.dense3 = nn.Linear(l3, 2)
         self.dropout = nn.Dropout(p=args.dropout)
         self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
@@ -204,6 +204,8 @@ class Conv1D(nn.Module):
         loss = -loss.mean()
 
         return loss, x
+    def calculate_output_length(self, length_in, kernel_size, stride=1, padding=0, dilation=1):
+        return (length_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
 
 
 def get_events_model(args):
@@ -211,10 +213,10 @@ def get_events_model(args):
     xshape2 = args.xshape2
     if args.events_model_type == "conv1d":
         model = Conv1D(args,
-                           xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3, l4=args.event_l4)
+                           xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3)
     elif args.events_model_type == "lstm" or args.events_model_type == "gru":
         logger.warning(f"shapes are {xshape1}, {xshape2}")
-        model = RecurrentModels(args, xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3, l4=args.event_l4)
+        model = RecurrentModels(args, xshape1, xshape2, l1=args.event_l1, l2=args.event_l2, l3=args.event_l3)
     else:
         raise NotImplementedError
 

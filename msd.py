@@ -116,7 +116,6 @@ def parse_args():
     parser.add_argument("--event_l1", type=int, default=1024, help="event l1")
     parser.add_argument("--event_l2", type=int, default=256, help="event l1")
     parser.add_argument("--event_l3", type=int, default=64, help="event l1")
-    parser.add_argument("--event_l4", type=int, default=2, help="event l1")
 
     # Code related arguments
     parser.add_argument("--code_merge_file",
@@ -545,7 +544,7 @@ def main(args):
 
             model_dir = os.path.join(args.output_dir, '{}'.format('checkpoint-best-acc'))
             output_dir = os.path.join(model_dir, f'model_{fold}.bin')
-            artifact = wandb.Artifact('model', type='model')
+            artifact = wandb.Artifact(f'model_{fold}', type='model')
             artifact.add_file(output_dir)
             run.log_artifact(artifact)
 
