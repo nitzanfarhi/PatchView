@@ -480,7 +480,7 @@ class EventsDataset(Dataset):
         self.timezones_path = os.path.join(
             args.cache_dir, "events", "timezones")
         self.cache = not args.recreate_cache
-        self.hash_list = keys
+        self.hash_list = sorted(keys)
 
         if self.cache and os.path.exists(self.current_path):
             logger.warning(f"Loading from cache - {self.current_path}")
@@ -489,6 +489,11 @@ class EventsDataset(Dataset):
             self.final_list_tensors = final_list_tensors
             self.final_list_labels = final_list_labels
             self.final_commit_info = final_commit_info
+
+            lists_together = zip(self.final_list_tensors, self.final_list_labels, self.final_commit_info)
+            lists_together = sorted(lists_together,key = lambda x: x[2]['hash'])
+            self.final_list_tensors, self.final_list_labels, self.final_commit_info = list(zip(*lists_together))
+
         else:
             logger.warning(f"Creating from scratch - {self.current_path}")
             self.create_list_of_hashes(all_json)
