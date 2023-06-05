@@ -152,6 +152,7 @@ class Conv1D(nn.Module):
         self.xshape1 = xshape1
         self.xshape2 = xshape2
 
+        # todo this is not correct!
         self.conv1d = nn.Conv1d(xshape1, xshape2, kernel_size=2 )
         self.max_pooling = nn.MaxPool1d(kernel_size=2)
         self.flatten = nn.Flatten()

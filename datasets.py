@@ -476,7 +476,7 @@ class EventsDataset(Dataset):
         self.final_commit_info = []
 
         self.current_path = os.path.join(
-            args.cache_dir, "events", f"events.json")
+            args.cache_dir, "events", f"events_{self.backs}.json")
         self.timezones_path = os.path.join(
             args.cache_dir, "events", "timezones")
         self.cache = not args.recreate_cache
