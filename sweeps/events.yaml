@@ -4,6 +4,13 @@ metric:
   name: eval_acc
   goal: maximize
 
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--"
+  - ${args}
+
 
   
 
