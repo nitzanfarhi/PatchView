@@ -106,7 +106,7 @@ def parse_args():
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
     parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v2", help="multi code model artifact")
-    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v1", help="multi events model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v5", help="multi events model artifact")
     parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v4", help="multi message model artifact")
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
@@ -520,7 +520,7 @@ def main(args):
 
     elif args.source_model == "Multi":
         dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
-        args.return_class = False
+        args.return_class = True
     else:
         raise NotImplementedError
 
