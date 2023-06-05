@@ -214,16 +214,18 @@ def get_events_model(args):
     return model
 
 
-def get_multi_model(args):
+def get_multi_model(args, message_tokenizer = None, code_tokenizer = None):
     code_model = get_code_model(args)
+    code_model.encoder.resize_token_embeddings(len(code_tokenizer))
     args.hidden_size = code_model.encoder.config.hidden_size
-    initialize_model_from_wandb(args, code_model, args.code_model_artifact)
-
-    message_model = get_message_model(args)
-    initialize_model_from_wandb(args, message_model, args.message_model_artifact)
+    initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
 
     events_model = get_events_model(args)
-    initialize_model_from_wandb(args, events_model, args.events_model_artifact)
+    initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
+    
+    message_model = get_message_model(args)
+    initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
+
 
     if args.multi_model_type == "multiv1":
         model = MultiModel(code_model, message_model, events_model, args)
@@ -245,10 +247,10 @@ def initialize_model_from_wandb(args, model, artifact_path):
         for param in model.parameters():
             param.requires_grad = False
 
-def get_model(args, tokenizer):
+def get_model(args, message_tokenizer=None, code_tokenizer=None):
     if args.source_model == "Code":
         model = get_code_model(args)
-        model.encoder.resize_token_embeddings(len(tokenizer))
+        model.encoder.resize_token_embeddings(len(code_tokenizer))
 
     elif args.source_model == "Message":
         model = get_message_model(args)
@@ -257,7 +259,7 @@ def get_model(args, tokenizer):
         model = get_events_model(args)
 
     elif args.source_model == "Multi":
-        model = get_multi_model(args)
+        model = get_multi_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
     return model
 
 
@@ -318,6 +320,7 @@ class CustomBERTModel(nn.Module):
     def __init__(self, args):
         super(CustomBERTModel, self).__init__()
         self.bert = RobertaModel.from_pretrained(args.message_model_name)
+        self.args = args
         ### New layers:
         self.linear1 = nn.Linear(768, self.args.message_l1)
         self.linear2 = nn.Linear(self.args.message_l1, self.args.message_l2)

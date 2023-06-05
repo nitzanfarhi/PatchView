@@ -105,7 +105,9 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
-
+    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v2", help="multi code model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v1", help="multi events model artifact")
+    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v4", help="multi message model artifact")
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")
@@ -491,33 +493,33 @@ def main(args):
     with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
 
-
+    code_tokenizer, message_tokenizer = None, None
+        
     if args.source_model == "Code":
-        tokenizer = get_tokenizer(
+        code_tokenizer = get_tokenizer(
             args, args.code_model_type, args.code_tokenizer_name)
-        dataset = TextDataset(tokenizer, args, mall,
+        dataset = TextDataset(code_tokenizer, args, mall,
                               mall.keys(), args.code_embedding_type, balance=True)
+        code_tokenizer = dataset.tokenizer
         args.return_class = True
 
 
     elif args.source_model == "Message":
-        tokenizer = get_tokenizer(
+        message_tokenizer = get_tokenizer(
             args, args.message_model_type, args.message_tokenizer_name)
-        dataset = TextDataset(tokenizer, args, mall,
+        dataset = TextDataset(message_tokenizer, args, mall,
                               mall.keys(), args.message_embedding_type, balance=True)
         args.return_class = True
 
 
     elif args.source_model == "Events":
-        tokenizer = None
         dataset = EventsDataset(args, mall, mall.keys(),  balance=True)
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True
 
     elif args.source_model == "Multi":
-        tokenizer = None
-        dataset = get_multi_dataset(args, mall)
+        dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
         args.return_class = False
     else:
         raise NotImplementedError
@@ -532,7 +534,7 @@ def main(args):
 
         logger.warning('Running Fold {}'.format(fold + 1))
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
-            model = get_model(args, tokenizer)
+            model = get_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
             run.define_metric("epoch")
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
@@ -557,11 +559,13 @@ def get_multi_dataset(args, mall):
         args, args.code_model_type, args.code_tokenizer_name)
     code_dataset = TextDataset(
         code_tokenizer, args, mall, keys, args.code_embedding_type)
+    code_tokenizer = code_dataset.tokenizer
 
     message_tokenizer = get_tokenizer(
         args, args.message_model_type, args.message_tokenizer_name)
     message_dataset = TextDataset(
         message_tokenizer, args, mall, keys, args.message_embedding_type)
+    message_tokenizer = message_dataset.tokenizer
 
     events_dataset = EventsDataset(args, mall, keys)
     args.xshape1 = events_dataset[0][0].shape[0]
@@ -569,7 +573,7 @@ def get_multi_dataset(args, mall):
     concat_dataset = MyConcatDataset(
         code_dataset, message_dataset, events_dataset)
 
-    return concat_dataset
+    return concat_dataset, code_tokenizer, message_tokenizer
 
 
 if __name__ == "__main__":
