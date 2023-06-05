@@ -52,10 +52,6 @@ parameters:
     min: 16
     max: 128
 
-  event_l4:
-    min: 16
-    max: 128
-
   batch_size:
     values: [32,64,128,256,512]
 
