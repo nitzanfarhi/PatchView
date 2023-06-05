@@ -46,7 +46,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Data Related arguments
-    parser.add_argument("--output_dir", default='./cache_data/saved_models', type=str,
+    parser.add_argument("--output_dir", default='./output', type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")
 
     parser.add_argument("--no_cuda", action='store_true',
@@ -477,7 +477,6 @@ def main(args):
 
     args.start_epoch = 0
     args.start_step = 0
-    args.output_dir = args.cache_dir
 
     if args.cache_dir:
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
@@ -540,9 +539,12 @@ def main(args):
             test(args, model, dataset, val_idx, fold=fold)
             run.summary[f"best_acc"]  = max(best_accs)
 
-            if fold == args.folds - 1:
-                wandb.alert(title="Finished last run",
-                            text=f"Run {max(best_accs)}: {' '.join(sys.argv)}")
+
+            model_dir = os.path.join(args.output_dir, '{}'.format('checkpoint-best-acc'))
+            output_dir = os.path.join(model_dir, f'model_{fold}.bin')
+            artifact = wandb.Artifact('model', type='model')
+            artifact.add_file(output_dir)
+            run.log_artifact(artifact)
 
     return {}
 
