@@ -1,4 +1,7 @@
 import logging
+import os
+
+import wandb
 logger = logging.getLogger(__name__)
 
 from transformers import RobertaModel, RobertaTokenizer
@@ -214,10 +217,14 @@ def get_events_model(args):
 def get_multi_model(args):
     code_model = get_code_model(args)
     args.hidden_size = code_model.encoder.config.hidden_size
+    initialize_model_from_wandb(args, code_model, args.code_model_artifact)
 
     message_model = get_message_model(args)
+    initialize_model_from_wandb(args, message_model, args.message_model_artifact)
 
     events_model = get_events_model(args)
+    initialize_model_from_wandb(args, events_model, args.events_model_artifact)
+
     if args.multi_model_type == "multiv1":
         model = MultiModel(code_model, message_model, events_model, args)
     elif args.multi_model_type == "multiv2":
@@ -227,8 +234,18 @@ def get_multi_model(args):
 
     return model
 
+def initialize_model_from_wandb(args, model, artifact_path):
+    artifact = wandb.use_artifact(artifact_path, type="model")
+    artifact_dir = artifact.download()
+    assert len(os.listdir(artifact_dir)) == 1, "More than one model in the artifact"
 
-def get_model(args, dataset, tokenizer):
+    model_path = os.path.join(artifact_dir,os.listdir(artifact_dir)[0])
+    model.load_state_dict(torch.load(model_path))
+    if args.freeze_submodel_layers:
+        for param in model.parameters():
+            param.requires_grad = False
+
+def get_model(args, tokenizer):
     if args.source_model == "Code":
         model = get_code_model(args)
         model.encoder.resize_token_embeddings(len(tokenizer))

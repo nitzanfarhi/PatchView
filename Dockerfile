@@ -21,3 +21,6 @@ COPY cache_data/orc/* cache_data/orc/
 # COPY cache_data/code/* cache_data/code/
 COPY *.py ./
 COPY sweeps/* sweeps/
+RUN echo 'root:root' | chpasswd
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN service ssh restart
