@@ -532,7 +532,7 @@ def main(args):
 
         logger.warning('Running Fold {}'.format(fold + 1))
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
-            model = get_model(args, dataset, tokenizer)
+            model = get_model(args, tokenizer)
             run.define_metric("epoch")
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
