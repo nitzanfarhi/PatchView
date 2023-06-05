@@ -121,22 +121,30 @@ class MultiModel(nn.Module):
         self.events_model = events_model
         self.args = args
         self.dropout = nn.Dropout(args.dropout)
-        self.classifier1 = nn.Linear(args.hidden_size * 3, 64)
-        self.classifier2 = nn.Linear(args.hidden_size * 64, args.hidden_size)
+        if args.return_class:
+            # 6 = 2 + 2 + 2
+            self.classifier1 = nn.Linear(2, 2)
+        else:
+            self.classifier1 = nn.Linear(self.args.hidden_size*2+self.events_model.dense3.out_features, 64)
+            self.classifier2 = nn.Linear(64, 2)
         self.activation = nn.Tanh()
 
     def forward(self, data, labels=None):
         code, message, events = data
-        code = self.code_model(code)
+        # code = self.code_model(code)
         message = self.message_model(message)
-        events = self.events_model(events)
-        x = torch.stack([code, message, events], dim=1)
-        x = x.reshape(code.shape[0], -1)
-        x = self.classifier1(x)
-        x = self.activation(x)
+        # events = self.events_model(events)
+        x = torch.cat([message], dim=1)
+        # x = x.reshape(code.shape[0], -1)
+        if self.args.return_class:
+            x = self.classifier1(x)
+            x = self.activation(x)
+        else:
+            x = self.classifier1(x)
+            x = self.activation(x)
+            x = self.classifier2(x)
+            x = self.activation(x)
 
-        x = self.classifier2(x)
-        x = self.activation(x)
         prob = torch.sigmoid(x)
         if labels is not None:
             labels = labels.float()
@@ -161,7 +169,7 @@ class Conv1D(nn.Module):
         self.flatten = nn.Flatten()
         self.dense1 = nn.Linear(self.xshape1 *self.xshape2 * 10, l1)
         self.dense2 = nn.Linear(l1, l2)
-        self.dense3 = nn.Linear(l2, l3)
+        self.dense3 = nn.Linear(l2, 2)
         self.dropout = nn.Dropout(p=args.dropout)
         self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
@@ -282,7 +290,7 @@ def get_message_model(args):
     if args.message_model_type == "roberta_classification":
         config.hidden_dropout_prob = args.dropout
         config.attention_probs_dropout_prob = args.dropout
-        model = CustomBERTModel(args)
+        model = RobertaClass(model, args)
         logger.warning("Using RobertaClass")
     elif args.message_model_type == "roberta":
         model = XGlueModel(model, args)
