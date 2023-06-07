@@ -1,14 +1,11 @@
 languages_cache/*
 orchestrator_*.json
 *.pyc
-.vscode/*
 *.pkl
 results.csv
 log/*
-.vscode/*
 saved_models/*
 *.log
-.vscode/launch.json
 *.log
 test_trainer/*
 wandb/*
@@ -20,3 +17,4 @@ Sandbox.ipynb
 artifacts/*
 test_table.table.json/*
 output/*
+.vscode/ltex.hiddenFalsePositives.en-US.txt

@@ -1,0 +1,128 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Multi",
+      "type": "python",
+      "request": "launch",
+      "program": "msd.py",
+      "console": "integratedTerminal",
+      "justMyCode": false, 
+      "args": [
+        "--epochs",
+        "10",
+        "--batch_size",
+        "2",
+        "-lr",
+        "1e-5",
+        "--dropout",
+        "0.7",
+    //    "--recreate_cache",
+        "--code_merge_file",
+        "--source_model",
+        "Multi",
+        "--freeze_submodel_layers"
+      ] 
+    },
+    {
+      "name": "Results",
+      "type": "python",
+      "request": "launch",
+      "program": "results.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--code_artifact",
+        "nitzanfarhi/MSD2/run-c7k2i0ao-test_table:v0",
+        "--message_artifact",
+        "nitzanfarhi/MSD2/run-5n24o8xr-test_table:v0",
+        "--event_artifact",
+        "nitzanfarhi/MSD2/run-7gqv0pye-test_table:v0",
+        "--aggr",
+        "avg"
+      ]
+    },
+    {
+      "name": "Message",
+      "type": "python",
+      "request": "launch",
+      "program": "msd.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--epochs",
+        "10",
+        "--batch_size","1",
+        "--source_model",
+        "Message",
+        "--no_cuda", 
+        "--message_model_type",
+        "roberta",
+        "--message_model_name",
+        "roberta-base",
+        "--message_tokenizer_name",
+        "roberta-base",
+        "--recreate_cache"
+      ]
+    },
+    {
+      "name": "Events",
+      "type": "python",
+      "request": "launch",
+      "program": "msd.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+      "--activation=tanh",
+      "--batch_size=128",
+      "--dropout=0.3",
+      "--epochs=100",
+      "--event_l1=101",
+      "--event_l2=66",
+      "--event_l3=81",
+      "--event_window_size=44",
+      "--folds=10",
+      "--learning_rate=0.0001",
+      "--run_fold=0",
+      "--source_model=Events" 
+      ]
+    },
+    {
+      "name": "Code",
+      "type": "python",
+      "request": "launch",
+      "program": "msd.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--epochs",
+        "10",
+        "--batch_size",
+        "8",
+        "--learning_rate",
+        "1e-5",
+        "-cet",
+        "sum",
+        "--dropout","0.3",
+    //   "--recreate_cache",
+        "--code_merge_file",
+        "--code_model_type",
+        "roberta",
+        "--source_model",
+        "Code"
+      ]
+    },
+    {
+      "name": "orchestrator",
+      "type": "python",
+      "request": "launch",
+      "program": "orchestator.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      // "args": [ ]
+    }
+  ]
+}
