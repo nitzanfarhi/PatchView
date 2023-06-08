@@ -67,7 +67,9 @@
         "roberta-base",
         "--message_tokenizer_name",
         "roberta-base",
-        "--recreate_cache"
+        "--recreate_cache",
+        "--cache_dir", "/storage/nitzan/cache_data/"
+
       ]
     },
     {
@@ -81,7 +83,7 @@
       "--activation=tanh",
       "--batch_size=128",
       "--dropout=0.3",
-      "--epochs=100",
+      "--epochs=200",
       "--event_l1=101",
       "--event_l2=66",
       "--event_l3=81",
@@ -89,7 +91,9 @@
       "--folds=10",
       "--learning_rate=0.0001",
       "--run_fold=0",
-      "--source_model=Events" 
+      "--source_model=Events" ,
+      "--cache_dir", "/storage/nitzan/cache_data/",
+
       ]
     },
     {
@@ -114,7 +118,9 @@
         "--code_model_type",
         "roberta",
         "--source_model",
-        "Code"
+        "Code",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+
       ]
     },
     {
