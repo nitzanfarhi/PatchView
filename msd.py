@@ -166,12 +166,9 @@ def evaluate(args, model, dataset, eval_idx=None):
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
     eval_sampler = SubsetRandomSampler(eval_idx)
-    if args.source_model == "Multi":
-        dataset.is_train = False
-        eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
-    else:
-        eval_dataloader = DataLoader(dataset, sampler=eval_sampler,
-                                 batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
+    dataset.is_train = False
+    eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
+
     # multi-gpu evaluate
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -186,10 +183,13 @@ def evaluate(args, model, dataset, eval_idx=None):
     logits = []
     labels = []
     for batch in eval_dataloader:
-        if args.source_model == "Multi":
-            inputs = [x.to(args.device) for x in batch[0]]
-        else:
-            inputs = batch[0].to(args.device)
+        inputs = []
+        for x in batch[0]:
+            if len(x) == 0:
+                continue
+            inputs.append(x.to(args.device))
+        if len(inputs) == 1:
+            inputs = inputs[0]
 
         label = batch[1].to(args.device)
         with torch.no_grad():
@@ -230,12 +230,8 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     # print train_dataset label percentages
     negatives = 0
     positives = 0
-    if args.source_model == "Multi":
-        train_dataset.is_train = True
-        train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
-    else:
-        train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
-                                      batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
+    train_dataset.is_train = True
+    train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
 
     for a in train_dataloader:
         for b in a[1]:
@@ -303,16 +299,21 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
 
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
+        train_dataset.is_train = True
+        model.train()
         bar = tqdm(train_dataloader, total=len(train_dataloader))
         tr_num = 0
         train_loss = 0
         for step, batch in enumerate(bar):
-            if args.source_model == "Multi":
-                inputs = [x.to(args.device) for x in batch[0]]
-            else:
-                inputs = batch[0].to(args.device)
+            inputs = []
+            for x in batch[0]:
+                if len(x) == 0:
+                    continue
+                inputs.append(x.to(args.device))
+            if len(inputs) == 1:
+                inputs = inputs[0]
+            
             labels = batch[1].to(args.device)
-            model.train()
             loss, logits = model(inputs, labels)
 
             if args.n_gpu > 1:
@@ -346,6 +347,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
                     results = evaluate(
                         args, model, train_dataset, eval_idx=eval_idx)
+                    
                     logger.warning(
                         f"eval_loss {float(results['eval_loss'])}")
                     logger.warning(
@@ -380,9 +382,8 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
 def test(args, model, dataset, idx, fold=0):
 
-    train_sampler = torch.utils.data.Subset(dataset, idx)
-    eval_dataloader = DataLoader(
-        train_sampler, batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
+    dataset.is_train = False
+    eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
@@ -401,11 +402,13 @@ def test(args, model, dataset, idx, fold=0):
     logits = []
     labels = []
     for batch in tqdm(eval_dataloader, total=len(eval_dataloader)):
-        if args.source_model == "Multi":
-            inputs = [x.to(args.device) for x in batch[0]]
-        else:
-            inputs = batch[0].to(args.device)
-
+        inputs = []
+        for x in batch[0]:
+            if len(x) == 0:
+                continue
+            inputs.append(x.to(args.device))
+        if len(inputs) == 1:
+            inputs = inputs[0]
         label = batch[1].to(args.device)
         with torch.no_grad():
             logit = model(inputs)
@@ -427,7 +430,10 @@ def test(args, model, dataset, idx, fold=0):
     preds = logits[:, 0] > best_threshold
 
     res = []
-    infos = [dataset.final_commit_info[x] for x in idx]
+    infos = []
+    for i in range(len(dataset)):
+        infos.append(dataset.get_info(i))
+
     for example, pred in zip(infos, preds):
         res.append([example['name'], example['hash'], pred, example['label']])
 
@@ -523,6 +529,7 @@ def main(args):
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True
+        dataset = MyConcatDataset(events_dataset=dataset)
 
     elif args.source_model == "Multi":
         dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
@@ -540,9 +547,8 @@ def main(args):
             continue
 
         logger.warning('Running Fold {}'.format(fold + 1))
-        if args.source_model == "Multi":
-            dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
-            dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
+        dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
+        dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
 
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
             model = get_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
@@ -583,7 +589,7 @@ def get_multi_dataset(args, mall):
     args.xshape1 = events_dataset[0][0].shape[0]
     args.xshape2 = events_dataset[0][0].shape[1]
     concat_dataset = MyConcatDataset(
-         code_dataset, message_dataset, events_dataset)
+         code_dataset=code_dataset, message_dataset=message_dataset, events_dataset=events_dataset)
 
     return concat_dataset, code_tokenizer, message_tokenizer
 
