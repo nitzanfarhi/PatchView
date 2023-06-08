@@ -20,11 +20,13 @@
         "1e-5",
         "--dropout",
         "0.7",
+        "-cet","sum",
     //    "--recreate_cache",
         "--code_merge_file",
         "--source_model",
         "Multi",
-        "--freeze_submodel_layers"
+        "--freeze_submodel_layers",
+        "--cache_dir", "/storage/nitzan/cache_data/"
       ] 
     },
     {
