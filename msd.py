@@ -514,6 +514,7 @@ def main(args):
                               mall.keys(), args.code_embedding_type, balance=True)
         code_tokenizer = dataset.tokenizer
         args.return_class = True
+        dataset = MyConcatDataset(code_dataset=dataset)
 
 
     elif args.source_model == "Message":
@@ -522,6 +523,7 @@ def main(args):
         dataset = TextDataset(message_tokenizer, args, mall,
                               mall.keys(), args.message_embedding_type, balance=True)
         args.return_class = True
+        dataset = MyConcatDataset(message_dataset=dataset)
 
 
     elif args.source_model == "Events":
