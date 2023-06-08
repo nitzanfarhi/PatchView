@@ -24,6 +24,7 @@ from sklearn.model_selection import KFold
 from tqdm import tqdm
 from models import get_model
 from torch.utils.data import DataLoader, SubsetRandomSampler
+import copy
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
@@ -165,9 +166,12 @@ def evaluate(args, model, dataset, eval_idx=None):
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
     eval_sampler = SubsetRandomSampler(eval_idx)
-    eval_dataloader = DataLoader(dataset, sampler=eval_sampler,
+    if args.source_model == "Multi":
+        dataset.is_train = False
+        eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
+    else:
+        eval_dataloader = DataLoader(dataset, sampler=eval_sampler,
                                  batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
-
     # multi-gpu evaluate
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -226,9 +230,12 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     # print train_dataset label percentages
     negatives = 0
     positives = 0
-
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
-                                  batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
+    if args.source_model == "Multi":
+        train_dataset.is_train = True
+        train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
+    else:
+        train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
+                                      batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
 
     for a in train_dataloader:
         for b in a[1]:
@@ -527,14 +534,20 @@ def main(args):
     splits = KFold(n_splits=args.folds, shuffle=True, random_state=args.seed)
 
     best_accs = []
-    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+    mall_keys_list = np.array(list(mall.keys()))
+    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(mall_keys_list)))):
         if args.run_fold != -1 and args.run_fold != fold:
             continue
 
         logger.warning('Running Fold {}'.format(fold + 1))
+        if args.source_model == "Multi":
+            dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
+            dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
+
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
             model = get_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
             run.define_metric("epoch")
+
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
             best_accs.append(best_acc)
@@ -570,7 +583,7 @@ def get_multi_dataset(args, mall):
     args.xshape1 = events_dataset[0][0].shape[0]
     args.xshape2 = events_dataset[0][0].shape[1]
     concat_dataset = MyConcatDataset(
-        code_dataset, message_dataset, events_dataset)
+         code_dataset, message_dataset, events_dataset)
 
     return concat_dataset, code_tokenizer, message_tokenizer
 
