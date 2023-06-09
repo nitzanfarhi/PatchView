@@ -166,7 +166,6 @@ def evaluate(args, model, dataset, eval_idx=None):
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
     eval_sampler = SubsetRandomSampler(eval_idx)
-    dataset.is_train = False
     eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
 
     # multi-gpu evaluate
@@ -231,7 +230,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     negatives = 0
     positives = 0
     train_dataset.is_train = True
-    train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
 
     for a in train_dataloader:
         for b in a[1]:
@@ -345,9 +344,11 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                     tr_nb = global_step
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
+                    train_dataset.is_train = False
                     results = evaluate(
                         args, model, train_dataset, eval_idx=eval_idx)
-                    
+                    train_dataset.is_train = True
+
                     logger.warning(
                         f"eval_loss {float(results['eval_loss'])}")
                     logger.warning(
@@ -511,19 +512,19 @@ def main(args):
         code_tokenizer = get_tokenizer(
             args, args.code_model_type, args.code_tokenizer_name)
         dataset = TextDataset(code_tokenizer, args, mall,
-                              mall.keys(), args.code_embedding_type, balance=True)
+                              mall.keys(), args.code_embedding_type, balance=False)
         code_tokenizer = dataset.tokenizer
         args.return_class = True
-        dataset = MyConcatDataset(code_dataset=dataset)
+        dataset = MyConcatDataset(args, code_dataset=dataset)
 
 
     elif args.source_model == "Message":
         message_tokenizer = get_tokenizer(
             args, args.message_model_type, args.message_tokenizer_name)
         dataset = TextDataset(message_tokenizer, args, mall,
-                              mall.keys(), args.message_embedding_type, balance=True)
+                              mall.keys(), args.message_embedding_type, balance=False)
         args.return_class = True
-        dataset = MyConcatDataset(message_dataset=dataset)
+        dataset = MyConcatDataset(args, message_dataset=dataset)
 
 
     elif args.source_model == "Events":
@@ -531,7 +532,7 @@ def main(args):
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True
-        dataset = MyConcatDataset(events_dataset=dataset)
+        dataset = MyConcatDataset(args, events_dataset=dataset)
 
     elif args.source_model == "Multi":
         dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
@@ -590,7 +591,7 @@ def get_multi_dataset(args, mall):
     events_dataset = EventsDataset(args, mall, keys)
     args.xshape1 = events_dataset[0][0].shape[0]
     args.xshape2 = events_dataset[0][0].shape[1]
-    concat_dataset = MyConcatDataset(
+    concat_dataset = MyConcatDataset(args,
          code_dataset=code_dataset, message_dataset=message_dataset, events_dataset=events_dataset)
 
     return concat_dataset, code_tokenizer, message_tokenizer
