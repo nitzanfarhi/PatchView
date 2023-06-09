@@ -15,7 +15,7 @@ parameters:
     values: [1e-3, 1e-4, 1e-5]
 
   event_window_size:
-    values: [10]
+    values: [5, 10, 15, 20, 25, 30, 35, 40]
 
   dropout:
     values: [0.2,0.3,0.4,0.5,0.6,0.7,0.8]
@@ -26,11 +26,14 @@ parameters:
   folds:
     value: 10
 
+  balance_factor:
+    values: [0.8,0.9,1.0,1.1,1.2]
+
   run_fold:
     values: [0,1,2,3,4,5,6,7,8,9]
 
   epochs:
-    value: 600
+    value: 200
     
   event_l1:
     min: 100
