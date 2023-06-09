@@ -10,16 +10,15 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-# COPY cache_data/orc/* cache_data/orc/
+WORKDIR /app_home
+COPY cache_data/orc/* cache_data/orc/
 # COPY cache_data/events/gh_cve_proccessed/*.parquet cache_data/events/gh_cve_proccessed/
 # COPY cache_data/events/timezones/*  cache_data/events/timezones/
 # COPY cache_data/events/*.json cache_data/events/
 # COPY cache_data/models cache_data/models
 # COPY cache_data/message/* cache_data/message/
 # COPY cache_data/code/* cache_data/code/
-# COPY *.py ./
-# COPY sweeps/* sweeps/
+COPY *.py ./
+COPY sweeps/* sweeps/
 RUN echo 'root:root' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-RUN mkdir /app_home/MultiSourceDetection
-WORKDIR /app_home/MultiSourceDetection
