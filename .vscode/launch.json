@@ -57,18 +57,13 @@
       "args": [
         "--epochs",
         "10",
-        "--batch_size","1",
-        "--source_model",
-        "Message",
-        "--no_cuda", 
-        "--message_model_type",
-        "roberta",
-        "--message_model_name",
-        "roberta-base",
-        "--message_tokenizer_name",
-        "roberta-base",
-        "--recreate_cache",
-        "--cache_dir", "/storage/nitzan/cache_data/"
+        "--batch_size","16",
+        "--source_model",       "Message",
+        "--message_model_type",      "roberta",
+        "--message_model_name",      "roberta-base",
+        "--message_tokenizer_name",     "roberta-base",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+    //    "--recreate_cache"
 
       ]
     },
