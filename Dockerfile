@@ -17,9 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # COPY cache_data/models cache_data/models
 # COPY cache_data/message/* cache_data/message/
 # COPY cache_data/code/* cache_data/code/
-# COPY *.py ./
-# COPY sweeps/* sweeps/
+WORKDIR /app_home
+COPY *.py ./
+COPY sweeps/* sweeps/
 RUN echo 'root:root' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-RUN mkdir /app_home/MultiSourceDetection
-WORKDIR /app_home/MultiSourceDetection
