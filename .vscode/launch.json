@@ -15,18 +15,36 @@
         "--epochs",
         "10",
         "--batch_size",
-        "2",
-        "-lr",
-        "1e-5",
-        "--dropout",
-        "0.7",
+        "8",
+        //"-lr",      "1e-5",
+        // "--dropout",    "0.7",
+        //    "--recreate_cache",
+        
+        "--freeze_submodel_layers",
+
         "-cet","sum",
-    //    "--recreate_cache",
         "--code_merge_file",
+        "--code_model_type",
+        "roberta",
+
+
+        "--activation=tanh",
+        "--event_l1=101",
+        "--event_l2=66",
+        "--event_l3=81",
+        "--event_window_size=44",
+       
+
+        "--message_model_type",      "roberta",
+        "--message_model_name",      "roberta-base",
+        "--message_tokenizer_name",     "roberta-base",
+
+
         "--source_model",
         "Multi",
-        "--freeze_submodel_layers",
-        "--cache_dir", "/storage/nitzan/cache_data/"
+       // "--freeze_submodel_layers",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","0",
       ] 
     },
     {
@@ -56,13 +74,14 @@
       "justMyCode": false,
       "args": [
         "--epochs",
-        "10",
-        "--batch_size","16",
+        "2",
+        "--batch_size","32",
         "--source_model",       "Message",
         "--message_model_type",      "roberta",
         "--message_model_name",      "roberta-base",
         "--message_tokenizer_name",     "roberta-base",
         "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","0",
     //    "--recreate_cache"
 
       ]
@@ -82,13 +101,13 @@
       "--event_l1=101",
       "--event_l2=66",
       "--event_l3=81",
-      "--event_window_size=44",
+      "--event_window_size=15",
       "--folds=10",
       "--learning_rate=0.0001",
-      "--run_fold=0",
       "--source_model=Events" ,
       "--cache_dir", "/storage/nitzan/cache_data/",
-
+      "--run_fold","0",
+    //  "--events_model_type", "gru",
       ]
     },
     {
@@ -102,7 +121,7 @@
         "--epochs",
         "10",
         "--batch_size",
-        "8",
+        "16",
         "--learning_rate",
         "1e-5",
         "-cet",
@@ -115,6 +134,7 @@
         "--source_model",
         "Code",
         "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","0",
 
       ]
     },
