@@ -30,7 +30,7 @@ MODEL_CLASSES = {
 
 
 class RecurrentModels(nn.Module):
-    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256, l4=64):
+    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256):
         super(RecurrentModels, self).__init__()
         if args.events_model_type == "lstm":
             self.model_type = nn.LSTM
@@ -42,20 +42,17 @@ class RecurrentModels(nn.Module):
         self.layer1 = self.model_type(xshape2, l1, batch_first=True)
         self.layer2 = self.model_type(l1, l2, batch_first=True)
         self.layer3 = self.model_type(l2, l3, batch_first=True)
-        self.layer4 = self.model_type(l3, l4, batch_first=True)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.fc = nn.Linear(l4, 2)
+        self.fc = nn.Linear(l3, 2)
         self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels):
-        x, (h, c) = self.layer1(x)
+        x = self.layer1(x)
         x = self.activation(x)
         x, (h, c) = self.layer2(x)
         x = self.activation(x)
         x, (h, c) = self.layer3(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer4(x)
         x = self.activation(x)
         x = self.fc(x[:, -1])
         x = self.sigmoid(x)
@@ -123,19 +120,20 @@ class MultiModel(nn.Module):
         self.dropout = nn.Dropout(args.dropout)
         if args.return_class:
             # 6 = 2 + 2 + 2
-            self.classifier1 = nn.Linear(2, 2)
+            self.classifier1 = nn.Linear(85, 2)
         else:
-            self.classifier1 = nn.Linear(self.args.hidden_size*2+self.events_model.dense3.out_features, 64)
+            # todo fix
+            self.classifier1 = nn.Linear(85, 64)
             self.classifier2 = nn.Linear(64, 2)
         self.activation = nn.Tanh()
 
     def forward(self, data, labels=None):
         code, message, events = data
-        # code = self.code_model(code)
+        code = self.code_model(code)
         message = self.message_model(message)
-        # events = self.events_model(events)
-        x = torch.cat([message], dim=1)
-        # x = x.reshape(code.shape[0], -1)
+        events = self.events_model(events)
+        x = torch.cat([code, message, events], dim=1)
+        x = x.reshape(code.shape[0], -1)
         if self.args.return_class:
             x = self.classifier1(x)
             x = self.activation(x)
@@ -162,14 +160,13 @@ class Conv1D(nn.Module):
         self.args = args
         self.xshape1 = xshape1
         self.xshape2 = xshape2
-        self.calculate_output_length(length_in=xshape1, kernel_size=2, stride=1, padding=0, dilation=1)
         # todo this is not correct!
-        self.conv1d = nn.Conv1d(xshape1, xshape2, kernel_size=2 )
+        self.conv1d = nn.Conv1d(xshape1, l1, kernel_size=2 )
         self.max_pooling = nn.MaxPool1d(kernel_size=2)
         self.flatten = nn.Flatten()
-        self.dense1 = nn.Linear(self.xshape1 *self.xshape2 * 10, l1)
-        self.dense2 = nn.Linear(l1, l2)
-        self.dense3 = nn.Linear(l2, l3)
+        self.dense1 = nn.Linear(l1*((self.xshape2-1)//2), l2)
+        self.dense2 = nn.Linear(l2, l3)
+        self.dense3 = nn.Linear(l3, 2)
         self.dropout = nn.Dropout(p=args.dropout)
         self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
@@ -190,9 +187,6 @@ class Conv1D(nn.Module):
         x = self.dense3(x)
         x = self.activation(x)
         x = self.dropout(x)
-        if self.args.source_model == "Multi" and not self.args.return_class:
-            # Returning for the multimodel to
-            return x
 
         x = self.sigmoid(x)
 
@@ -204,9 +198,7 @@ class Conv1D(nn.Module):
         loss = -loss.mean()
 
         return loss, x
-    def calculate_output_length(self, length_in, kernel_size, stride=1, padding=0, dilation=1):
-        return (length_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
-
+    
 
 def get_events_model(args):
     xshape1 = args.xshape1

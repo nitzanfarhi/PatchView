@@ -28,7 +28,7 @@ import copy
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
-PROJECT_NAME = 'MSD3'
+PROJECT_NAME = 'MSD4'
 
 
 MODEL_CLASSES = {
@@ -106,9 +106,9 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
-    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v2", help="multi code model artifact")
-    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v5", help="multi events model artifact")
-    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v4", help="multi message model artifact")
+    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD4/Code_model_0.bin:v0", help="multi code model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD4/model_0:v0", help="multi events model artifact")
+    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD4/Message_model_0.bin:v0", help="multi message model artifact")
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")
@@ -370,7 +370,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         model_to_save = model.module if hasattr(
                             model, 'module') else model
                         output_dir = os.path.join(
-                            output_dir, '{}'.format(f'model_{fold}.bin'))
+                            output_dir, '{}'.format(f'{args.source_model}_model_{fold}.bin'))
                         torch.save(model_to_save.state_dict(), output_dir)
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
@@ -565,8 +565,8 @@ def main(args):
 
 
             model_dir = os.path.join(args.output_dir, '{}'.format('checkpoint-best-acc'))
-            output_dir = os.path.join(model_dir, f'model_{fold}.bin')
-            artifact = wandb.Artifact(f'model_{fold}', type='model')
+            output_dir = os.path.join(model_dir, f'{args.source_model}_model_{fold}.bin')
+            artifact = wandb.Artifact(f'{args.source_model}_model_{fold}.bin', type='model')
             artifact.add_file(output_dir)
             run.log_artifact(artifact)
 
