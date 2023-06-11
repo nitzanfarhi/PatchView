@@ -106,9 +106,11 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
-    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/code4/Code_model_7.bin:v1", help="multi code model artifact")
-    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD4/Events_model_7.bin:v0", help="multi events model artifact")
-    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/message4/Message_model_7.bin:v0", help="multi message model artifact")
+
+    parser.add_argument("--multi_code_model_artifact", type=str, default="", help="multi code model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="", help="multi events model artifact")
+    parser.add_argument("--multi_message_model_artifact", type=str, default="", help="multi message model artifact")
+    
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")

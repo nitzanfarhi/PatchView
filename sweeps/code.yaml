@@ -38,14 +38,11 @@ parameters:
   batch_size:
     values: [8,16,32]
 
-  balance_factor:
-    values: [0.5]
-
   weight_decay:
     values: [0.01, 0.001, 0.0001]
 
-  activation:
-    values: ["tanh", "relu"]
+  code_activation:
+    values: ["tanh"]
 
   code_embedding_type:
     values: ["sum","simple_with_tokens","simple_with_comments","simple"]

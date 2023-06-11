@@ -20,12 +20,10 @@
         // "--dropout",    "0.7",
         //    "--recreate_cache",
         
-        "--freeze_submodel_layers",
+    //    "--freeze_submodel_layers",
 
         "-cet","simple_with_comments",
         "--code_merge_file",
-        "--code_model_type",
-        "roberta",
 
 
         "--activation=tanh",
@@ -46,7 +44,11 @@
         "--cache_dir", "/storage/nitzan/cache_data/",
         "--run_fold","7",
 
-        "--weight_decay=0.0001"
+        "--weight_decay=0.0001",
+
+        "--multi_code_model_artifact=nitzanfarhi/code4/Code_model_7.bin:v1",
+        "--multi_events_model_artifact=nitzanfarhi/MSD4/Events_model_7.bin:v0",
+        "--multi_message_model_artifact=nitzanfarhi/message4/Message_model_7.bin:v0",
       ] 
     },
     {
