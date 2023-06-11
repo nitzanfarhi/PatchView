@@ -106,9 +106,9 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
-    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD4/Code_model_0.bin:v0", help="multi code model artifact")
-    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD4/model_0:v0", help="multi events model artifact")
-    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD4/Message_model_0.bin:v0", help="multi message model artifact")
+    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/code4/Code_model_7.bin:v1", help="multi code model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD4/Events_model_7.bin:v0", help="multi events model artifact")
+    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/message4/Message_model_7.bin:v0", help="multi message model artifact")
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")
@@ -117,6 +117,8 @@ def parse_args():
     parser.add_argument("--event_l1", type=int, default=1024, help="event l1")
     parser.add_argument("--event_l2", type=int, default=256, help="event l1")
     parser.add_argument("--event_l3", type=int, default=64, help="event l1")
+    parser.add_argument("--event_bidirectional", type=int, default=0, help="bidirectional")
+    parser.add_argument("--event_activation", type=str, default="tanh", help="activation")
 
     # Code related arguments
     parser.add_argument("--code_merge_file",
@@ -129,10 +131,11 @@ def parse_args():
                         help="The model checkpoint for weights initialization.")
     parser.add_argument("--code_tokenizer_name", default="microsoft/codebert-base", type=str,
                         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path")
+    parser.add_argument("--code_activation", default="tanh", type=str, help="activation")
 
     # Message related arguments
     parser.add_argument("--message_model_type", type=str,
-                        default="roberta_classification", help="message model type")
+                        default="roberta", help="message model type")
     parser.add_argument("--message_embedding_type", "-met",
                         default="commit_message", type=str)
     parser.add_argument("--message_model_name", default="roberta-base", type=str,
@@ -143,7 +146,8 @@ def parse_args():
     parser.add_argument("--message_l2", type=int, default=256, help="message l1")
     parser.add_argument("--message_l3", type=int, default=64, help="message l1")
     parser.add_argument("--message_l4", type=int, default=2, help="message l1")
-
+    parser.add_argument("--message_activation", default="tanh", type=str, help="activation")
+                        
     return parser.parse_args()
 
 
@@ -454,15 +458,15 @@ def get_tokenizer(args, model_type, tokenizer_name):
     args.block_size = tokenizer.max_len_single_sentence
     return tokenizer
 
-def define_activation(args):
-    if args.activation == "tanh":
-        args.activation = torch.nn.Tanh()
-    elif args.activation == "relu":
-        args.activation = torch.nn.ReLU()
-    elif args.activation == "sigmoid":
-        args.activation = torch.nn.Sigmoid()
-    elif args.activation == "leakyrelu":
-        args.activation = torch.nn.LeakyReLU()
+def define_activation(cur_activation):
+    if cur_activation == "tanh":
+        return torch.nn.Tanh()
+    elif cur_activation == "relu":
+        return torch.nn.ReLU()
+    elif cur_activation == "sigmoid":
+        return torch.nn.Sigmoid()
+    elif cur_activation == "leakyrelu":
+        return torch.nn.LeakyReLU()
     else:
         raise NotImplementedError
 
@@ -499,9 +503,10 @@ def main(args):
 
     logger.warning("Training/evaluation parameters %s", args)
 
-    define_activation(args)
-    # define_message_model_type(args)
-    # define_code_model_type(args)
+    args.code_activation = define_activation(args.code_activation)
+    args.message_activation = define_activation(args.message_activation)
+    args.event_activation = define_activation(args.event_activation)
+
 
     with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
