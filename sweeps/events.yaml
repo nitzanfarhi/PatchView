@@ -12,7 +12,10 @@ early_terminate:
 
 parameters:
   learning_rate:
-    values: [1e-3, 1e-4, 1e-5]
+    values: [1e-2, 1e-3, 1e-4, 1e-5]
+
+  weight_decay:
+    values: [0,0.1,0.01,0.001]
 
   event_window_size:
     values: [10, 15, 20, 25, 30, 35, 40]
@@ -27,28 +30,33 @@ parameters:
     value: 10
 
   run_fold:
-    values: [0,1,2,3,4,5,6,7,8,9]
+    values: [0]
 
   epochs:
-    value: 600
+    value: 1000
     
   event_l1:
     min: 100
     max: 1024
 
-  event_l2:
-    min: 16
-    max: 128
+  event_bidirectional:
+    values: [0,1]
+  # event_l2:
+  #   min: 16
+  #   max: 128
 
-  event_l3:
-    min: 16
-    max: 128
+  # event_l3:
+  #   min: 16
+  #   max: 128
 
   batch_size:
-    values: [32,64,128,256,512]
+    values: [128,256,512]
 
-  activation:
-    values: ["tanh", "relu"]
+  # activation:
+  #   values: ["tanh", "relu"]
 
   cache_dir:
     values: ["/storage/nitzan/cache_data/"]
+
+  events_model_type:
+    values: ["gru","lstm"]

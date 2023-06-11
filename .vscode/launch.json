@@ -22,17 +22,17 @@
         
         "--freeze_submodel_layers",
 
-        "-cet","sum",
+        "-cet","simple_with_comments",
         "--code_merge_file",
         "--code_model_type",
         "roberta",
 
 
         "--activation=tanh",
-        "--event_l1=101",
-        "--event_l2=66",
-        "--event_l3=81",
-        "--event_window_size=44",
+        "--event_l1=863",
+        "--event_l2=101",
+        "--event_l3=66",
+        "--event_window_size=25",
        
 
         "--message_model_type",      "roberta",
@@ -44,7 +44,9 @@
         "Multi",
        // "--freeze_submodel_layers",
         "--cache_dir", "/storage/nitzan/cache_data/",
-        "--run_fold","0",
+        "--run_fold","7",
+
+        "--weight_decay=0.0001"
       ] 
     },
     {
@@ -95,19 +97,19 @@
       "justMyCode": false,
       "args": [
       "--activation=tanh",
-      "--batch_size=128",
-      "--dropout=0.3",
-      "--epochs=200",
-      "--event_l1=101",
-      "--event_l2=66",
-      "--event_l3=81",
-      "--event_window_size=15",
+      "--batch_size=32",
+      "--dropout=0.2",
+      "--epochs=148",
+      "--event_l1=863",
+      "--event_l2=101",
+      "--event_l3=66",
+      "--event_window_size=25",
       "--folds=10",
-      "--learning_rate=0.0001",
+      // "--learning_rate=0.0001",
       "--source_model=Events" ,
       "--cache_dir", "/storage/nitzan/cache_data/",
-      "--run_fold","0",
-    //  "--events_model_type", "gru",
+      "--run_fold","7",
+      "--learning_rate", "1e-5",
       ]
     },
     {

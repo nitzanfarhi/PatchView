@@ -39,23 +39,35 @@ class RecurrentModels(nn.Module):
         else:
             raise NotImplementedError
         self.args = args
-        self.layer1 = self.model_type(xshape2, l1, batch_first=True)
-        self.layer2 = self.model_type(l1, l2, batch_first=True)
-        self.layer3 = self.model_type(l2, l3, batch_first=True)
+
+        self.num_classes = 2
+        self.num_layers = 2
+        self.hidden_size = l1
+
+        self.l3 = l3
+        self.num_layers = 1
+        self.bidirectional = self.args.event_bidirectional == 1 
+
+        self.layer1 = self.model_type(input_size = xshape2, hidden_size = self.hidden_size, num_layers = self.num_layers, batch_first=True, bidirectional=self.bidirectional)
+        # self.layer2 = self.model_type(l1, l2, batch_first=True)
+        # self.layer3 = self.model_type(l2, l3, batch_first=True)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.fc = nn.Linear(l3, 2)
-        self.activation = self.args.activation
+        self.fc = nn.Linear(l1, 2)
+        # self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, labels):
-        x = self.layer1(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer2(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer3(x)
-        x = self.activation(x)
-        x = self.fc(x[:, -1])
-        x = self.sigmoid(x)
+
+    def forward(self, x, labels=None):
+        h_0 = torch.zeros(self.num_layers * (1+self.bidirectional), x.size(0), self.hidden_size).to(self.args.device)
+        _, h_out = self.layer1(x, h_0)
+        if self.bidirectional:
+            h_out  = h_out.mean(dim=0)
+        h_out = h_out.view(-1, self.hidden_size)
+        h_out = self.dropout(h_out)
+
+        out = self.fc(h_out)
+
+        x = self.sigmoid(out)
 
         if labels is None:
             return x
@@ -67,6 +79,10 @@ class RecurrentModels(nn.Module):
         return loss, x
 
 
+
+
+
+
 class RobertaClass(torch.nn.Module):
     def __init__(self, l1, args):
         super(RobertaClass, self).__init__()
@@ -74,7 +90,13 @@ class RobertaClass(torch.nn.Module):
         self.args = args
         self.hidden_size = self.encoder.config.hidden_size
         self.dropout = torch.nn.Dropout(args.dropout)
-        self.activation = args.activation
+
+        if args.source_model == "Message":
+            self.activation = self.args.message_activation
+        else:
+            self.activation =  self.args.code_activation
+
+
         self.linear1 = torch.nn.Linear(self.hidden_size, self.args.hidden_size)
         self.linear2 = torch.nn.Linear(self.args.hidden_size, 2)
         self.args = args
@@ -168,7 +190,7 @@ class Conv1D(nn.Module):
         self.dense2 = nn.Linear(l2, l3)
         self.dense3 = nn.Linear(l3, 2)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.activation = self.args.activation
+        self.activation = self.args.event_activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels=None):
@@ -331,7 +353,11 @@ class CustomBERTModel(nn.Module):
         self.linear2 = nn.Linear(self.args.message_l4, 2) ## 3 is the number of classes in this example
         self.args = args
         self.sigmoid = nn.Sigmoid()
-        self.activation = self.args.activation
+        if args.source_model == "Message":
+            self.activation = self.args.message_activation
+        else:
+            self.activation =  self.args.code_activation
+
         self.dropout = nn.Dropout(p=args.dropout)
 
     def forward(self, input_ids, labels=None):
