@@ -41,13 +41,14 @@ parameters:
 
   event_bidirectional:
     values: [0,1]
-  # event_l2:
-  #   min: 16
-  #   max: 128
+    
+  event_l2:
+    min: 16
+    max: 128
 
-  # event_l3:
-  #   min: 16
-  #   max: 128
+  event_l3:
+    min: 16
+    max: 128
 
   batch_size:
     values: [128,256,512]

@@ -142,10 +142,10 @@ class MultiModel(nn.Module):
         self.dropout = nn.Dropout(args.dropout)
         if args.return_class:
             # 6 = 2 + 2 + 2
-            self.classifier1 = nn.Linear(85, 2)
+            self.classifier1 = nn.Linear(6, 2)
         else:
             # todo fix
-            self.classifier1 = nn.Linear(85, 64)
+            self.classifier1 = nn.Linear(6, 64)
             self.classifier2 = nn.Linear(64, 2)
         self.activation = nn.Tanh()
 
@@ -242,13 +242,16 @@ def get_multi_model(args, message_tokenizer = None, code_tokenizer = None):
     code_model = get_code_model(args)
     code_model.encoder.resize_token_embeddings(len(code_tokenizer))
     args.hidden_size = code_model.encoder.config.hidden_size
-    initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
+    if args.multi_code_model_artifact:
+        initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
 
     events_model = get_events_model(args)
-    initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
+    if args.multi_events_model_artifact:
+        initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
     
     message_model = get_message_model(args)
-    initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
+    if args.multi_message_model_artifact:
+        initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
 
 
     if args.multi_model_type == "multiv1":

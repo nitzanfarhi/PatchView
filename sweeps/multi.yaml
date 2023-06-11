@@ -1,0 +1,71 @@
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--code_merge_file"
+  - ${args}
+
+program: msd.py
+method: bayes
+metric:
+  name: eval_acc
+  goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 20
+  eta: 2
+
+parameters:
+  learning_rate:
+    values: [1e-4, 5e-5, 3e-5, 1e-5]
+
+  dropout:
+    values: [0.2,0.3,0.4,0.5,0.6,0.7,0.8]
+
+  source_model:
+    value: Multi
+  
+  folds:
+    value: 10
+
+  run_fold:
+    values: [0,1,2,3,4,5,6,7,8,9]
+
+  epochs:
+    value: 100
+
+  batch_size:
+    values: [8,16,32]
+
+
+  weight_decay:
+    values: [0.01, 0.001, 0.0001]
+
+  code_activation:
+    values: ["tanh"]
+
+  code_embedding_type:
+    values: ["sum","simple_with_tokens","simple_with_comments","simple"]
+
+  cache_dir:
+    values:  ["/storage/nitzan/cache_data/"]
+
+  message_activation:
+    values: ["tanh"]
+
+
+  event_activation:
+    values: ["tanh"]
+
+  event_l1:
+    min: 100
+    max: 1024
+   
+  event_l2:
+    min: 16
+    max: 128
+
+  event_l3:
+    min: 16
+    max: 128
