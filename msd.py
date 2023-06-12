@@ -137,7 +137,7 @@ def parse_args():
 
     # Message related arguments
     parser.add_argument("--message_model_type", type=str,
-                        default="roberta", help="message model type")
+                        default="roberta_classification", help="message model type")
     parser.add_argument("--message_embedding_type", "-met",
                         default="commit_message", type=str)
     parser.add_argument("--message_model_name", default="roberta-base", type=str,
@@ -472,10 +472,7 @@ def define_activation(cur_activation):
     else:
         raise NotImplementedError
 
-def define_message_model_type(args):
-    if args.message_model_name == "roberta-base":
-        args.message_model_type = "roberta"
-    
+
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available()
@@ -556,7 +553,7 @@ def main(args):
         if args.run_fold != -1 and args.run_fold != fold:
             continue
 
-        logger.warning('Running Fold {}'.format(fold + 1))
+        logger.warning('Running Fold {}'.format(fold))
         dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
         dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
 
