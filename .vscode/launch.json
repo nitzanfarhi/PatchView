@@ -33,7 +33,6 @@
         "--event_window_size=25",
        
 
-        "--message_model_type",      "roberta",
         "--message_model_name",      "roberta-base",
         "--message_tokenizer_name",     "roberta-base",
 
@@ -48,7 +47,7 @@
 
         "--multi_code_model_artifact=nitzanfarhi/code4/Code_model_7.bin:v1",
         "--multi_events_model_artifact=nitzanfarhi/MSD4/Events_model_7.bin:v0",
-        "--multi_message_model_artifact=nitzanfarhi/message4/Message_model_7.bin:v0",
+        "--multi_message_model_artifact=nitzanfarhi/MSD4/Message_model_7.bin:v0",
       ] 
     },
     {
@@ -81,11 +80,10 @@
         "2",
         "--batch_size","32",
         "--source_model",       "Message",
-        "--message_model_type",      "roberta",
         "--message_model_name",      "roberta-base",
         "--message_tokenizer_name",     "roberta-base",
         "--cache_dir", "/storage/nitzan/cache_data/",
-        "--run_fold","0",
+        "--run_fold","7",
     //    "--recreate_cache"
 
       ]
