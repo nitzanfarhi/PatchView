@@ -38,9 +38,6 @@ parameters:
   event_l1:
     min: 100
     max: 1024
-
-  event_bidirectional:
-    values: [0,1]
     
   event_l2:
     min: 16
@@ -60,4 +57,7 @@ parameters:
     values: ["/storage/nitzan/cache_data/"]
 
   events_model_type:
-    values: ["gru","lstm"]
+    values: ["conv1d"]
+  
+  balance_factor:
+    values: [0.8,0.9,1.0,1.1,1.2]
