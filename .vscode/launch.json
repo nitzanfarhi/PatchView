@@ -4,6 +4,7 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+
     {
       "name": "Multi",
       "type": "python",
@@ -103,13 +104,14 @@
       "--event_l1=863",
       "--event_l2=101",
       "--event_l3=66",
-      "--event_window_size=25",
+      "--event_window_size=10",
       "--folds=10",
       // "--learning_rate=0.0001",
       "--source_model=Events" ,
-      "--cache_dir", "/storage/nitzan/cache_data/",
+      "--cache_dir", "cache_data",
       "--run_fold","7",
       "--learning_rate", "1e-5",
+      "--early_stop_threshold", "2"
       ]
     },
     {
