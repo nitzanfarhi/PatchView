@@ -224,7 +224,8 @@ class TextDataset(Dataset):
 
 
 class MyConcatDataset(torch.utils.data.Dataset):
-    def __init__(self, code_dataset, message_dataset, events_dataset):
+    def __init__(self, args, code_dataset=None, message_dataset=None, events_dataset=None):
+        self.args = args
         self.code_dataset = code_dataset
         self.message_dataset = message_dataset
         self.events_dataset = events_dataset
@@ -232,85 +233,134 @@ class MyConcatDataset(torch.utils.data.Dataset):
         self.merged_dataset = []
         self.merged_labels = []
         self.final_commit_info = []
-        code_counter = 0
-        message_counter = 0
-        events_counter = 0
-        logger.warning(f"Number of code samples: {len(code_dataset)}")
-        logger.warning(f"Number of message samples: {len(message_dataset)}")
-        logger.warning(f"Number of events samples: {len(events_dataset)}")
 
-        in_counter = 0
-        code_hash_list = [x["hash"] for x in code_dataset.final_commit_info]
-        message_hash_list = [x["hash"]
-                             for x in message_dataset.final_commit_info]
-        events_hash_list = [x["hash"]
-                            for x in events_dataset.final_commit_info]
-        assert sorted(code_hash_list) == code_hash_list
-        assert sorted(message_hash_list) == message_hash_list
-        assert sorted(events_hash_list) == events_hash_list
-        while code_counter < len(code_dataset) and message_counter < len(message_dataset) and events_counter < len(events_dataset):
-            code_commit = code_dataset.final_commit_info[code_counter]
-            message_commit = message_dataset.final_commit_info[message_counter]
-            events_commit = events_dataset.final_commit_info[events_counter]
+        self.code_hash_list = None
+        self.message_hash_list = None
+        self.events_hash_list = None
 
-            if code_commit["hash"] == message_commit["hash"] == events_commit["hash"]:
-                self.merged_dataset.append(
-                    (code_dataset[code_counter][0], message_dataset[message_counter][0], events_dataset[events_counter][0]))
-                self.merged_labels.append(code_dataset[code_counter][1])
-                self.final_commit_info.append(
-                    code_dataset.final_commit_info[code_counter])
-                in_counter += 1
-                # print(in_counter)
-                code_counter += 1
-                message_counter += 1
-                events_counter += 1
-            elif code_commit["hash"] < message_commit["hash"]:
-                code_counter += 1
-            elif message_commit["hash"] < events_commit["hash"]:
-                message_counter += 1
-            else:
-                events_counter += 1
+        if code_dataset is not None:
+            self.code_hash_list = [x["hash"] for x in code_dataset.final_commit_info]
+        if message_dataset is not None:
+            self.message_hash_list = [x["hash"]
+                                  for x in message_dataset.final_commit_info]
+        if events_dataset is not None:
+            self.events_hash_list = [x["hash"]
+                                 for x in events_dataset.final_commit_info]
+        
+        self.is_train = True
+     
+    def set_hashes(self, hash_list, is_train = True):
+        # if is_train:
+        #     self.train_merged_dataset = []
+        #     self.train_merged_labels = []
+        #     self.train_final_commit_info = []
+        # else:
+        #     self.val_merged_dataset = []
+        #     self.val_merged_labels = []
+        #     self.val_final_commit_info = []
+        pos_cur_merged_dataset = []
+        pos_cur_merged_labels = []
+        pos_cur_final_commit_info = []
+        neg_cur_merged_dataset = []
+        neg_cur_merged_labels = []
+        neg_cur_final_commit_info = []
 
-        logger.warning(
-            "Number of merged samples before balancing: "+str(len(self.merged_dataset)))
-        self.balance_dataset()
-        logger.warning("Number of merged samples after balancing: " +
-                       str(len(self.merged_dataset)))
 
-    def balance_dataset(self):
-        pos_idxs = []
-        neg_idxs = []
+        # ugly but easy
+        labels_counter = [0,0]
+        for hash in tqdm(hash_list):
+            try:
+                labels = []
+                infos = []
+                if self.code_hash_list is None:
+                    cur_code = {}
+                else:
+                    code_idx = self.code_hash_list.index(hash)
+                    cur_code = self.code_dataset[code_idx][0]
+                    labels.append(self.code_dataset[code_idx][1])
+                    infos.append(self.code_dataset.final_commit_info[code_idx])
 
-        for i, label in enumerate(self.merged_labels):
-            if label == 1:
-                pos_idxs.append(i)
-            else:
-                neg_idxs.append(i)
-        min_idxs = min(len(pos_idxs), len(neg_idxs))
-        pos_idxs = pos_idxs[:min_idxs]
-        neg_idxs = neg_idxs[:min_idxs]
+                if self.message_hash_list is None:
+                    cur_message = {}
+                else:
+                    message_idx = self.message_hash_list.index(hash)
+                    cur_message = self.message_dataset[message_idx][0]
+                    labels.append(self.message_dataset[message_idx][1])
+                    infos.append(self.message_dataset.final_commit_info[message_idx])
 
-        tmp_merged_dataset = []
-        tmp_merged_labels = []
-        tmp_final_commit_info = []
-        for i in range(len(self.merged_labels)):
-            if i in pos_idxs or i in neg_idxs:
-                tmp_merged_dataset.append(self.merged_dataset[i])
-                tmp_merged_labels.append(self.merged_labels[i])
-                tmp_final_commit_info.append(self.final_commit_info[i])
+                if self.events_hash_list is None:
+                    cur_events = {}
+                else:
+                    events_idx = self.events_hash_list.index(hash)
+                    cur_events = self.events_dataset[events_idx][0]
+                    labels.append(self.events_dataset[events_idx][1])
+                    infos.append(self.events_dataset.final_commit_info[events_idx])
 
-        self.merged_dataset = tmp_merged_dataset
-        self.merged_labels = tmp_merged_labels
-        self.final_commit_info = tmp_final_commit_info
+                assert labels.count(labels[0]) == len(labels)
+                labels_counter[labels[0]] += 1
+
+                if labels[0] == 1:
+                    pos_cur_merged_dataset.append((cur_code, cur_message, cur_events ))
+                    pos_cur_merged_labels.append(labels[0])
+                    pos_cur_final_commit_info.append(infos[0])
+                else:
+                    neg_cur_merged_dataset.append((cur_code, cur_message, cur_events ))
+                    neg_cur_merged_labels.append(labels[0])
+                    neg_cur_final_commit_info.append(infos[0])
+
+            except ValueError:
+                continue
+        
+
+        min_idxs = min(len(pos_cur_merged_dataset), len(neg_cur_merged_dataset))
+        pos_cur_merged_dataset = pos_cur_merged_dataset[:min_idxs]
+        pos_cur_merged_labels = pos_cur_merged_labels[:min_idxs]
+        pos_cur_final_commit_info = pos_cur_final_commit_info[:min_idxs]
+
+        neg_cur_merged_dataset = neg_cur_merged_dataset[: int(min_idxs * self.args.balance_factor)]
+        neg_cur_merged_labels = neg_cur_merged_labels[: int(min_idxs * self.args.balance_factor)]
+        neg_cur_final_commit_info = neg_cur_final_commit_info[: int(min_idxs * self.args.balance_factor)]
+
+        cur_merged_dataset = pos_cur_merged_dataset + neg_cur_merged_dataset
+        cur_merged_labels = pos_cur_merged_labels + neg_cur_merged_labels
+        cur_final_commit_info = pos_cur_final_commit_info + neg_cur_final_commit_info
+
+        if is_train:
+            self.train_merged_dataset = cur_merged_dataset
+            self.train_merged_labels = cur_merged_labels
+            self.train_final_commit_info = cur_final_commit_info
+            mlen = len(self.train_merged_dataset)
+            name = 'Train'
+        else:
+            self.val_merged_dataset = cur_merged_dataset
+            self.val_merged_labels = cur_merged_labels
+            self.val_final_commit_info = cur_final_commit_info
+            mlen = len(self.val_merged_dataset)
+            name = 'Val'
+
+        logger.warning(f"Merged {name} is {mlen}")
+
+
 
     def __getitem__(self, i):
-        return self.merged_dataset[i], self.merged_labels[i]
+        if self.is_train:
+            return self.train_merged_dataset[i], self.train_merged_labels[i]
+        else:
+            return self.val_merged_dataset[i], self.val_merged_labels[i]
+
 
     def get_info(self, i):
-        return self.merged_info[i]
+        if self.is_train:
+            return self.train_final_commit_info[i]
+        else:
+            return self.val_final_commit_info[i]
 
     def __len__(self):
-        return len(self.merged_dataset)
+        if self.is_train:
+            return len(self.train_merged_dataset)
+        else:
+            return len(self.val_merged_dataset)
+
 
 
 def get_commit_from_repo(cur_repo, hash):

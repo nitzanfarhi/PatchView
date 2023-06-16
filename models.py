@@ -30,7 +30,7 @@ MODEL_CLASSES = {
 
 
 class RecurrentModels(nn.Module):
-    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256, l4=64):
+    def __init__(self, args, xshape1, xshape2, l1=1024, l2=256, l3=256):
         super(RecurrentModels, self).__init__()
         if args.events_model_type == "lstm":
             self.model_type = nn.LSTM
@@ -39,26 +39,35 @@ class RecurrentModels(nn.Module):
         else:
             raise NotImplementedError
         self.args = args
-        self.layer1 = self.model_type(xshape2, l1, batch_first=True)
-        self.layer2 = self.model_type(l1, l2, batch_first=True)
-        self.layer3 = self.model_type(l2, l3, batch_first=True)
-        self.layer4 = self.model_type(l3, l4, batch_first=True)
+
+        self.num_classes = 2
+        self.num_layers = 2
+        self.hidden_size = l1
+
+        self.l3 = l3
+        self.num_layers = 1
+        self.bidirectional = self.args.event_bidirectional == 1 
+
+        self.layer1 = self.model_type(input_size = xshape2, hidden_size = self.hidden_size, num_layers = self.num_layers, batch_first=True, bidirectional=self.bidirectional)
+        # self.layer2 = self.model_type(l1, l2, batch_first=True)
+        # self.layer3 = self.model_type(l2, l3, batch_first=True)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.fc = nn.Linear(l4, 2)
-        self.activation = self.args.activation
+        self.fc = nn.Linear(l1, 2)
+        # self.activation = self.args.activation
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, labels):
-        x, (h, c) = self.layer1(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer2(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer3(x)
-        x = self.activation(x)
-        x, (h, c) = self.layer4(x)
-        x = self.activation(x)
-        x = self.fc(x[:, -1])
-        x = self.sigmoid(x)
+
+    def forward(self, x, labels=None):
+        h_0 = torch.zeros(self.num_layers * (1+self.bidirectional), x.size(0), self.hidden_size).to(self.args.device)
+        _, h_out = self.layer1(x, h_0)
+        if self.bidirectional:
+            h_out  = h_out.mean(dim=0)
+        h_out = h_out.view(-1, self.hidden_size)
+        h_out = self.dropout(h_out)
+
+        out = self.fc(h_out)
+
+        x = self.sigmoid(out)
 
         if labels is None:
             return x
@@ -70,6 +79,10 @@ class RecurrentModels(nn.Module):
         return loss, x
 
 
+
+
+
+
 class RobertaClass(torch.nn.Module):
     def __init__(self, l1, args):
         super(RobertaClass, self).__init__()
@@ -77,7 +90,13 @@ class RobertaClass(torch.nn.Module):
         self.args = args
         self.hidden_size = self.encoder.config.hidden_size
         self.dropout = torch.nn.Dropout(args.dropout)
-        self.activation = args.activation
+
+        if args.source_model == "Message":
+            self.activation = self.args.message_activation
+        else:
+            self.activation =  self.args.code_activation
+
+
         self.linear1 = torch.nn.Linear(self.hidden_size, self.args.hidden_size)
         self.linear2 = torch.nn.Linear(self.args.hidden_size, 2)
         self.args = args
@@ -123,19 +142,20 @@ class MultiModel(nn.Module):
         self.dropout = nn.Dropout(args.dropout)
         if args.return_class:
             # 6 = 2 + 2 + 2
-            self.classifier1 = nn.Linear(2, 2)
+            self.classifier1 = nn.Linear(6, 2)
         else:
-            self.classifier1 = nn.Linear(self.args.hidden_size*2+self.events_model.dense3.out_features, 64)
+            # todo fix
+            self.classifier1 = nn.Linear(6, 64)
             self.classifier2 = nn.Linear(64, 2)
         self.activation = nn.Tanh()
 
     def forward(self, data, labels=None):
         code, message, events = data
-        # code = self.code_model(code)
+        code = self.code_model(code)
         message = self.message_model(message)
-        # events = self.events_model(events)
-        x = torch.cat([message], dim=1)
-        # x = x.reshape(code.shape[0], -1)
+        events = self.events_model(events)
+        x = torch.cat([code, message, events], dim=1)
+        x = x.reshape(code.shape[0], -1)
         if self.args.return_class:
             x = self.classifier1(x)
             x = self.activation(x)
@@ -162,7 +182,6 @@ class Conv1D(nn.Module):
         self.args = args
         self.xshape1 = xshape1
         self.xshape2 = xshape2
-        self.calculate_output_length(length_in=xshape1, kernel_size=2, stride=1, padding=0, dilation=1)
         # todo this is not correct!
         self.conv1d = nn.Conv1d(xshape1, l1, kernel_size=2 )
         self.max_pooling = nn.MaxPool1d(kernel_size=2)
@@ -171,7 +190,7 @@ class Conv1D(nn.Module):
         self.dense2 = nn.Linear(l2, l3)
         self.dense3 = nn.Linear(l3, 2)
         self.dropout = nn.Dropout(p=args.dropout)
-        self.activation = self.args.activation
+        self.activation = self.args.event_activation
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, labels=None):
@@ -190,9 +209,6 @@ class Conv1D(nn.Module):
         x = self.dense3(x)
         x = self.activation(x)
         x = self.dropout(x)
-        if self.args.source_model == "Multi" and not self.args.return_class:
-            # Returning for the multimodel to
-            return x
 
         x = self.sigmoid(x)
 
@@ -204,9 +220,7 @@ class Conv1D(nn.Module):
         loss = -loss.mean()
 
         return loss, x
-    def calculate_output_length(self, length_in, kernel_size, stride=1, padding=0, dilation=1):
-        return (length_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
-
+    
 
 def get_events_model(args):
     xshape1 = args.xshape1
@@ -228,13 +242,16 @@ def get_multi_model(args, message_tokenizer = None, code_tokenizer = None):
     code_model = get_code_model(args)
     code_model.encoder.resize_token_embeddings(len(code_tokenizer))
     args.hidden_size = code_model.encoder.config.hidden_size
-    initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
+    if args.multi_code_model_artifact:
+        initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
 
     events_model = get_events_model(args)
-    initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
+    if args.multi_events_model_artifact:
+        initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
     
     message_model = get_message_model(args)
-    initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
+    if args.multi_message_model_artifact:
+        initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
 
 
     if args.multi_model_type == "multiv1":
@@ -339,7 +356,11 @@ class CustomBERTModel(nn.Module):
         self.linear2 = nn.Linear(self.args.message_l4, 2) ## 3 is the number of classes in this example
         self.args = args
         self.sigmoid = nn.Sigmoid()
-        self.activation = self.args.activation
+        if args.source_model == "Message":
+            self.activation = self.args.message_activation
+        else:
+            self.activation =  self.args.code_activation
+
         self.dropout = nn.Dropout(p=args.dropout)
 
     def forward(self, input_ids, labels=None):

@@ -22,3 +22,4 @@ COPY *.py ./
 COPY sweeps/* sweeps/
 RUN echo 'root:root' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
