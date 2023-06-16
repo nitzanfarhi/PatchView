@@ -24,10 +24,11 @@ from sklearn.model_selection import KFold
 from tqdm import tqdm
 from models import get_model
 from torch.utils.data import DataLoader, SubsetRandomSampler
+import copy
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
-PROJECT_NAME = 'MSD3'
+PROJECT_NAME = 'MSD4'
 
 
 MODEL_CLASSES = {
@@ -96,6 +97,7 @@ def parse_args():
     parser.add_argument("--folds", type=int, default=10, help="folds")
     parser.add_argument("--run_fold", type=int, default=-1, help="run_fold")
     parser.add_argument("--balance_factor", type=float, default=1.0, help="balance_factor")
+    parser.add_argument("--early_stop_threshold", type=int, default=20, help="early_stop_threshold")
 
     # Source related arguments
     parser.add_argument("--source_model", type=str,
@@ -105,9 +107,11 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
-    parser.add_argument("--multi_code_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v2", help="multi code model artifact")
-    parser.add_argument("--multi_events_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v5", help="multi events model artifact")
-    parser.add_argument("--multi_message_model_artifact", type=str, default="nitzanfarhi/MSD3/model:v4", help="multi message model artifact")
+
+    parser.add_argument("--multi_code_model_artifact", type=str, default="", help="multi code model artifact")
+    parser.add_argument("--multi_events_model_artifact", type=str, default="", help="multi events model artifact")
+    parser.add_argument("--multi_message_model_artifact", type=str, default="", help="multi message model artifact")
+    
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")
@@ -116,6 +120,8 @@ def parse_args():
     parser.add_argument("--event_l1", type=int, default=1024, help="event l1")
     parser.add_argument("--event_l2", type=int, default=256, help="event l1")
     parser.add_argument("--event_l3", type=int, default=64, help="event l1")
+    parser.add_argument("--event_bidirectional", type=int, default=0, help="bidirectional")
+    parser.add_argument("--event_activation", type=str, default="tanh", help="activation")
 
     # Code related arguments
     parser.add_argument("--code_merge_file",
@@ -128,6 +134,7 @@ def parse_args():
                         help="The model checkpoint for weights initialization.")
     parser.add_argument("--code_tokenizer_name", default="microsoft/codebert-base", type=str,
                         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path")
+    parser.add_argument("--code_activation", default="tanh", type=str, help="activation")
 
     # Message related arguments
     parser.add_argument("--message_model_type", type=str,
@@ -142,7 +149,8 @@ def parse_args():
     parser.add_argument("--message_l2", type=int, default=256, help="message l1")
     parser.add_argument("--message_l3", type=int, default=64, help="message l1")
     parser.add_argument("--message_l4", type=int, default=2, help="message l1")
-
+    parser.add_argument("--message_activation", default="tanh", type=str, help="activation")
+                        
     return parser.parse_args()
 
 
@@ -165,8 +173,7 @@ def evaluate(args, model, dataset, eval_idx=None):
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
     eval_sampler = SubsetRandomSampler(eval_idx)
-    eval_dataloader = DataLoader(dataset, sampler=eval_sampler,
-                                 batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
+    eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
 
     # multi-gpu evaluate
     if args.n_gpu > 1:
@@ -182,10 +189,13 @@ def evaluate(args, model, dataset, eval_idx=None):
     logits = []
     labels = []
     for batch in eval_dataloader:
-        if args.source_model == "Multi":
-            inputs = [x.to(args.device) for x in batch[0]]
-        else:
-            inputs = batch[0].to(args.device)
+        inputs = []
+        for x in batch[0]:
+            if len(x) == 0:
+                continue
+            inputs.append(x.to(args.device))
+        if len(inputs) == 1:
+            inputs = inputs[0]
 
         label = batch[1].to(args.device)
         with torch.no_grad():
@@ -226,9 +236,8 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     # print train_dataset label percentages
     negatives = 0
     positives = 0
-
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler,
-                                  batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True)
+    train_dataset.is_train = True
+    train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
 
     for a in train_dataloader:
         for b in a[1]:
@@ -295,17 +304,24 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     model.zero_grad()
 
 
+
+
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
+        train_dataset.is_train = True
+        model.train()
         bar = tqdm(train_dataloader, total=len(train_dataloader))
         tr_num = 0
         train_loss = 0
         for step, batch in enumerate(bar):
-            if args.source_model == "Multi":
-                inputs = [x.to(args.device) for x in batch[0]]
-            else:
-                inputs = batch[0].to(args.device)
+            inputs = []
+            for x in batch[0]:
+                if len(x) == 0:
+                    continue
+                inputs.append(x.to(args.device))
+            if len(inputs) == 1:
+                inputs = inputs[0]
+            
             labels = batch[1].to(args.device)
-            model.train()
             loss, logits = model(inputs, labels)
 
             if args.n_gpu > 1:
@@ -337,8 +353,11 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                     tr_nb = global_step
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
+                    train_dataset.is_train = False
                     results = evaluate(
                         args, model, train_dataset, eval_idx=eval_idx)
+                    train_dataset.is_train = True
+
                     logger.warning(
                         f"eval_loss {float(results['eval_loss'])}")
                     logger.warning(
@@ -347,6 +366,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         f"eval_acc {round(results['eval_acc'],4)}")
 
                     if results['eval_acc'] > best_acc:
+                        best_epoch = idx
                         best_acc = results['eval_acc']
                         logger.info("  "+"*"*20)
                         logger.info("  Best acc:%s", round(best_acc, 4))
@@ -360,22 +380,27 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         model_to_save = model.module if hasattr(
                             model, 'module') else model
                         output_dir = os.path.join(
-                            output_dir, '{}'.format(f'model_{fold}.bin'))
+                            output_dir, '{}'.format(f'{args.source_model}_model_{fold}.bin'))
                         torch.save(model_to_save.state_dict(), output_dir)
                         logger.info(
                             "Saving model checkpoint to %s", output_dir)
 
                     wandb.log({f"epoch": idx, f"train_loss": final_train_loss, "global_step": global_step,
                               f"eval_loss": results['eval_loss'], f"eval_acc": results['eval_acc']})
+                    
+        
+        if idx - best_epoch > args.early_stop_threshold:
+            logger.warning(f"Early stopped training at epoch {idx}")
+            break  # terminate the training loop
 
+    wandb.summary["best_epoch"] = best_epoch
     return best_acc
 
 
 def test(args, model, dataset, idx, fold=0):
 
-    train_sampler = torch.utils.data.Subset(dataset, idx)
-    eval_dataloader = DataLoader(
-        train_sampler, batch_size=args.train_batch_size, num_workers=0, pin_memory=True)
+    dataset.is_train = False
+    eval_dataloader = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
@@ -394,11 +419,13 @@ def test(args, model, dataset, idx, fold=0):
     logits = []
     labels = []
     for batch in tqdm(eval_dataloader, total=len(eval_dataloader)):
-        if args.source_model == "Multi":
-            inputs = [x.to(args.device) for x in batch[0]]
-        else:
-            inputs = batch[0].to(args.device)
-
+        inputs = []
+        for x in batch[0]:
+            if len(x) == 0:
+                continue
+            inputs.append(x.to(args.device))
+        if len(inputs) == 1:
+            inputs = inputs[0]
         label = batch[1].to(args.device)
         with torch.no_grad():
             logit = model(inputs)
@@ -420,7 +447,10 @@ def test(args, model, dataset, idx, fold=0):
     preds = logits[:, 0] > best_threshold
 
     res = []
-    infos = [dataset.final_commit_info[x] for x in idx]
+    infos = []
+    for i in range(len(dataset)):
+        infos.append(dataset.get_info(i))
+
     for example, pred in zip(infos, preds):
         res.append([example['name'], example['hash'], pred, example['label']])
 
@@ -440,22 +470,19 @@ def get_tokenizer(args, model_type, tokenizer_name):
     args.block_size = tokenizer.max_len_single_sentence
     return tokenizer
 
-def define_activation(args):
-    if args.activation == "tanh":
-        args.activation = torch.nn.Tanh()
-    elif args.activation == "relu":
-        args.activation = torch.nn.ReLU()
-    elif args.activation == "sigmoid":
-        args.activation = torch.nn.Sigmoid()
-    elif args.activation == "leakyrelu":
-        args.activation = torch.nn.LeakyReLU()
+def define_activation(cur_activation):
+    if cur_activation == "tanh":
+        return torch.nn.Tanh()
+    elif cur_activation == "relu":
+        return torch.nn.ReLU()
+    elif cur_activation == "sigmoid":
+        return torch.nn.Sigmoid()
+    elif cur_activation == "leakyrelu":
+        return torch.nn.LeakyReLU()
     else:
         raise NotImplementedError
 
-def define_message_model_type(args):
-    if args.message_model_name == "roberta-base":
-        args.message_model_type = "roberta"
-    
+
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available()
@@ -485,9 +512,10 @@ def main(args):
 
     logger.warning("Training/evaluation parameters %s", args)
 
-    define_activation(args)
-    # define_message_model_type(args)
-    # define_code_model_type(args)
+    args.code_activation = define_activation(args.code_activation)
+    args.message_activation = define_activation(args.message_activation)
+    args.event_activation = define_activation(args.event_activation)
+
 
     with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
         mall = json.load(f)
@@ -498,17 +526,19 @@ def main(args):
         code_tokenizer = get_tokenizer(
             args, args.code_model_type, args.code_tokenizer_name)
         dataset = TextDataset(code_tokenizer, args, mall,
-                              mall.keys(), args.code_embedding_type, balance=True)
+                              mall.keys(), args.code_embedding_type, balance=False)
         code_tokenizer = dataset.tokenizer
         args.return_class = True
+        dataset = MyConcatDataset(args, code_dataset=dataset)
 
 
     elif args.source_model == "Message":
         message_tokenizer = get_tokenizer(
             args, args.message_model_type, args.message_tokenizer_name)
         dataset = TextDataset(message_tokenizer, args, mall,
-                              mall.keys(), args.message_embedding_type, balance=True)
+                              mall.keys(), args.message_embedding_type, balance=False)
         args.return_class = True
+        dataset = MyConcatDataset(args, message_dataset=dataset)
 
 
     elif args.source_model == "Events":
@@ -516,6 +546,7 @@ def main(args):
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True
+        dataset = MyConcatDataset(args, events_dataset=dataset)
 
     elif args.source_model == "Multi":
         dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
@@ -527,14 +558,19 @@ def main(args):
     splits = KFold(n_splits=args.folds, shuffle=True, random_state=args.seed)
 
     best_accs = []
-    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+    mall_keys_list = np.array(list(mall.keys()))
+    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(mall_keys_list)))):
         if args.run_fold != -1 and args.run_fold != fold:
             continue
 
-        logger.warning('Running Fold {}'.format(fold + 1))
+        logger.warning('Running Fold {}'.format(fold))
+        dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
+        dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
+
         with wandb.init(project=PROJECT_NAME, tags=[args.source_model],  config=args) as run:
             model = get_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
             run.define_metric("epoch")
+
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
             best_accs.append(best_acc)
@@ -543,8 +579,8 @@ def main(args):
 
 
             model_dir = os.path.join(args.output_dir, '{}'.format('checkpoint-best-acc'))
-            output_dir = os.path.join(model_dir, f'model_{fold}.bin')
-            artifact = wandb.Artifact(f'model_{fold}', type='model')
+            output_dir = os.path.join(model_dir, f'{args.source_model}_model_{fold}.bin')
+            artifact = wandb.Artifact(f'{args.source_model}_model_{fold}.bin', type='model')
             artifact.add_file(output_dir)
             run.log_artifact(artifact)
 
@@ -569,8 +605,8 @@ def get_multi_dataset(args, mall):
     events_dataset = EventsDataset(args, mall, keys)
     args.xshape1 = events_dataset[0][0].shape[0]
     args.xshape2 = events_dataset[0][0].shape[1]
-    concat_dataset = MyConcatDataset(
-        code_dataset, message_dataset, events_dataset)
+    concat_dataset = MyConcatDataset(args,
+         code_dataset=code_dataset, message_dataset=message_dataset, events_dataset=events_dataset)
 
     return concat_dataset, code_tokenizer, message_tokenizer
 

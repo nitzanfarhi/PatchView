@@ -4,6 +4,7 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+
     {
       "name": "Multi",
       "type": "python",
@@ -15,16 +16,39 @@
         "--epochs",
         "10",
         "--batch_size",
-        "2",
-        "-lr",
-        "1e-5",
-        "--dropout",
-        "0.7",
-    //    "--recreate_cache",
+        "8",
+        //"-lr",      "1e-5",
+        // "--dropout",    "0.7",
+        //    "--recreate_cache",
+        
+    //    "--freeze_submodel_layers",
+
+        "-cet","simple_with_comments",
         "--code_merge_file",
+
+
+        "--activation=tanh",
+        "--event_l1=863",
+        "--event_l2=101",
+        "--event_l3=66",
+        "--event_window_size=25",
+       
+
+        "--message_model_name",      "roberta-base",
+        "--message_tokenizer_name",     "roberta-base",
+
+
         "--source_model",
         "Multi",
-        "--freeze_submodel_layers"
+       // "--freeze_submodel_layers",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","7",
+
+        "--weight_decay=0.0001",
+
+        "--multi_code_model_artifact=nitzanfarhi/code4/Code_model_7.bin:v1",
+        "--multi_events_model_artifact=nitzanfarhi/MSD4/Events_model_7.bin:v0",
+        "--multi_message_model_artifact=nitzanfarhi/MSD4/Message_model_7.bin:v0",
       ] 
     },
     {
@@ -54,18 +78,15 @@
       "justMyCode": false,
       "args": [
         "--epochs",
-        "10",
-        "--batch_size","1",
-        "--source_model",
-        "Message",
-        "--no_cuda", 
-        "--message_model_type",
-        "roberta",
-        "--message_model_name",
-        "roberta-base",
-        "--message_tokenizer_name",
-        "roberta-base",
-        "--recreate_cache"
+        "2",
+        "--batch_size","32",
+        "--source_model",       "Message",
+        "--message_model_name",      "roberta-base",
+        "--message_tokenizer_name",     "roberta-base",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","7",
+    //    "--recreate_cache"
+
       ]
     },
     {
@@ -77,17 +98,20 @@
       "justMyCode": false,
       "args": [
       "--activation=tanh",
-      "--batch_size=128",
-      "--dropout=0.3",
-      "--epochs=100",
-      "--event_l1=101",
-      "--event_l2=66",
-      "--event_l3=81",
-      "--event_window_size=44",
+      "--batch_size=32",
+      "--dropout=0.2",
+      "--epochs=148",
+      "--event_l1=863",
+      "--event_l2=101",
+      "--event_l3=66",
+      "--event_window_size=10",
       "--folds=10",
-      "--learning_rate=0.0001",
-      "--run_fold=0",
-      "--source_model=Events" 
+      // "--learning_rate=0.0001",
+      "--source_model=Events" ,
+      "--cache_dir", "cache_data",
+      "--run_fold","7",
+      "--learning_rate", "1e-5",
+      "--early_stop_threshold", "2"
       ]
     },
     {
@@ -101,7 +125,7 @@
         "--epochs",
         "10",
         "--batch_size",
-        "8",
+        "16",
         "--learning_rate",
         "1e-5",
         "-cet",
@@ -112,7 +136,10 @@
         "--code_model_type",
         "roberta",
         "--source_model",
-        "Code"
+        "Code",
+        "--cache_dir", "/storage/nitzan/cache_data/",
+        "--run_fold","0",
+
       ]
     },
     {

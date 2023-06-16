@@ -37,44 +37,47 @@ def merge_rows(df, args):
 
 
 def show_results(args):
+    with wandb.init() as run:
+        if args.local_dir != "":
+            code_df = pd.read_csv(os.path.join(
+                args.local_dir, "code_results.csv"), index_name="Hash")
+            message_df = pd.read_csv(os.path.join(
+                args.local_dir, "message_results.csv"), index_name="Hash")
+            event_df = pd.read_csv(os.path.join(
+                args.local_dir, "event_results.csv"), index_name="Hash")
 
-    if args.local_dir != "":
-        code_df = pd.read_csv(os.path.join(
-            args.local_dir, "code_results.csv"), index_name="Hash")
-        message_df = pd.read_csv(os.path.join(
-            args.local_dir, "message_results.csv"), index_name="Hash")
-        event_df = pd.read_csv(os.path.join(
-            args.local_dir, "event_results.csv"), index_name="Hash")
-
-    else:
-        with wandb.init() as run:
+        else:
             code_df = wandb_to_df(run.use_artifact(
-                args.code_artifact).get("test_table.table.json"))
+                args.code_artifact).get(f"test_table_{args.fold}.table.json"))
             message_df = wandb_to_df(run.use_artifact(
-                args.message_artifact).get("test_table.table.json"))
+                args.message_artifact).get(f"test_table_{args.fold}.table.json"))
             event_df = wandb_to_df(run.use_artifact(
-                args.event_artifact).get("test_table.table.json"))
+                args.event_artifact).get(f"test_table_{args.fold}.table.json"))
 
-    code_df = merge_rows(code_df, args)
-    message_df = merge_rows(message_df, args)
-    event_df = merge_rows(event_df, args)
+            code_df = merge_rows(code_df, args)
+            message_df = merge_rows(message_df, args)
+            event_df = merge_rows(event_df, args)
 
-    all = pd.merge(pd.merge(code_df, message_df, left_index=True,
-                   right_index=True), event_df, left_index=True, right_index=True)
+            all = pd.merge(pd.merge(code_df, message_df, left_index=True,
+                        right_index=True), event_df, left_index=True, right_index=True)
 
-    all['predicted_avg'] = all[['Prediction_x',
-                                'Prediction_y', 'Prediction']].mean(axis=1)
+            all['predicted_avg'] = all[['Prediction_x',
+                                        'Prediction_y', 'Prediction']].mean(axis=1)
 
-    best_accuracy = 0
-    best_threshold = 0
-    for i in range(100):
-        final_accuracy = accuracy_score(
-            all['Actual'], all['predicted_avg'] > i/100)
-        if final_accuracy > best_accuracy:
-            best_accuracy = final_accuracy
-            best_threshold = i/100
-    print("Best threshold: ", best_threshold)
-    print("Final accuracy: ", best_accuracy)
+            best_accuracy = 0
+            best_threshold = 0
+            for i in range(100):
+                final_accuracy = accuracy_score(
+                    all['Actual'], all['predicted_avg'] > i/100)
+                if final_accuracy > best_accuracy:
+                    best_accuracy = final_accuracy
+                    best_threshold = i/100
+
+            
+            print("Best threshold: ", best_threshold)
+            run.summary["best_threshold"] = best_threshold
+            run.summary["best_accuracy"] = best_accuracy
+            print("Final accuracy: ", best_accuracy)
 
 
 def parse_args():
@@ -89,10 +92,12 @@ def parse_args():
                         help="Aggregation function to use")
     parser.add_argument("--local_dir", type=str, default="",
                         help="Gather tables from local directory")
+    parser.add_argument("--fold", type=int, default=0)
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
     args = parse_args()
+    
     show_results(args)
