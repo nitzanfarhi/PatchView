@@ -97,6 +97,7 @@ def parse_args():
     parser.add_argument("--folds", type=int, default=10, help="folds")
     parser.add_argument("--run_fold", type=int, default=-1, help="run_fold")
     parser.add_argument("--balance_factor", type=float, default=1.0, help="balance_factor")
+    parser.add_argument("--early_stop_threshold", type=int, default=20, help="early_stop_threshold")
 
     # Source related arguments
     parser.add_argument("--source_model", type=str,
@@ -303,6 +304,8 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     model.zero_grad()
 
 
+
+
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
         train_dataset.is_train = True
         model.train()
@@ -363,6 +366,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                         f"eval_acc {round(results['eval_acc'],4)}")
 
                     if results['eval_acc'] > best_acc:
+                        best_epoch = idx
                         best_acc = results['eval_acc']
                         logger.info("  "+"*"*20)
                         logger.info("  Best acc:%s", round(best_acc, 4))
@@ -383,7 +387,13 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
                     wandb.log({f"epoch": idx, f"train_loss": final_train_loss, "global_step": global_step,
                               f"eval_loss": results['eval_loss'], f"eval_acc": results['eval_acc']})
+                    
+        
+        if idx - best_epoch > args.early_stop_threshold:
+            logger.warning(f"Early stopped training at epoch {idx}")
+            break  # terminate the training loop
 
+    wandb.summary["best_epoch"] = best_epoch
     return best_acc
 
 
