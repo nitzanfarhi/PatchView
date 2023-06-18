@@ -59,14 +59,14 @@
       "console": "integratedTerminal",
       "justMyCode": true,
       "args": [
-        "--code_artifact",
-        "nitzanfarhi/MSD2/run-c7k2i0ao-test_table:v0",
-        "--message_artifact",
-        "nitzanfarhi/MSD2/run-5n24o8xr-test_table:v0",
-        "--event_artifact",
-        "nitzanfarhi/MSD2/run-7gqv0pye-test_table:v0",
-        "--aggr",
-        "avg"
+        //  "--code_artifact",
+        //  "nitzanfarhi/code4/Code_model_0.bin:v16",
+        //  "--message_artifact",
+        //  "nitzanfarhi/message4/Message_model_0.bin:v110",
+        //  "--event_artifact",
+        //  "nitzanfarhi/events4/Events_model_0.bin:v135",
+        // "--aggr",
+        // "avg"
       ]
     },
     {
@@ -100,18 +100,22 @@
       "--activation=tanh",
       "--batch_size=32",
       "--dropout=0.2",
-      "--epochs=148",
-      "--event_l1=863",
-      "--event_l2=101",
-      "--event_l3=66",
-      "--event_window_size=10",
+      "--epochs=1000",
+      "--event_l1=601",
+      "--event_l2=37",
+      "--event_l3=60",
+      "--event_window_size_before=30",
+      "--event_window_size_after=15",
       "--folds=10",
       // "--learning_rate=0.0001",
       "--source_model=Events" ,
       "--cache_dir", "cache_data",
       "--run_fold","7",
       "--learning_rate", "1e-5",
-      "--early_stop_threshold", "2"
+      "--early_stop_threshold", "1000",
+      "--balance_factor","0.8",
+      "--run_fold","0",
+      "--weight_decay","0.001",
       ]
     },
     {

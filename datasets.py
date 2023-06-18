@@ -520,13 +520,14 @@ def handle_commit(commit, tokenizer, args, embedding_type='concat'):
 class EventsDataset(Dataset):
     def __init__(self, args, all_json, keys, balance=False):
         self.args = args
-        self.backs = args.event_window_size
+        self.before_backs = args.event_window_size_before
+        self.after_backs = args.event_window_size_after
         self.final_list_tensors = []
         self.final_list_labels = []
         self.final_commit_info = []
 
         self.current_path = os.path.join(
-            args.cache_dir, "events", f"events_{self.backs}.json")
+            args.cache_dir, "events", f"events_{self.before_backs}_{self.after_backs}.json")
         self.timezones_path = os.path.join(
             args.cache_dir, "events", "timezones")
         self.cache = not args.recreate_cache
@@ -580,7 +581,7 @@ class EventsDataset(Dataset):
                 assert len(wanted_row) == 1, "Hash is not unique"
                 wanted_row = wanted_row[0]
                 event_window = get_event_window(
-                    cur_repo, wanted_row, backs=self.backs)
+                    cur_repo, wanted_row, before_backs=self.before_backs, after_backs=self.after_backs )
                 event_window = add_metadata(
                     self.timezones_path, all_metadata, event_window, repo_name)
                 event_window = event_window.drop(["Hash", "Vuln"], axis=1)

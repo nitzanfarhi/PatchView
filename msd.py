@@ -115,8 +115,8 @@ def parse_args():
     # Events related arguments
     parser.add_argument("--events_model_type", type=str,
                         default="conv1d", help="events model type")
-    parser.add_argument("--event_window_size", type=int,
-                        default=10, help="event window size")
+    parser.add_argument("--event_window_size_before", type=int,                        default=10, help="event window size")
+    parser.add_argument("--event_window_size_after", type=int,                        default=10, help="event window size")
     parser.add_argument("--event_l1", type=int, default=1024, help="event l1")
     parser.add_argument("--event_l2", type=int, default=256, help="event l1")
     parser.add_argument("--event_l3", type=int, default=64, help="event l1")

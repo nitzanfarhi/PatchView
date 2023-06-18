@@ -321,7 +321,8 @@ def get_event_window(cur_repo_data,
                      aggr_options=Aggregate.before_cve,
                      days=10,
                      hours=10,
-                     backs=50,
+                     before_backs=50,
+                     after_backs=50,
                      resample=24):
     """
     :param cur_repo_data: DataFrame that is processed
@@ -354,12 +355,12 @@ def get_event_window(cur_repo_data,
         raise NotImplementedError
 
     elif aggr_options == Aggregate.before_cve:
-        start = max(0, event - backs)
-        res = cur_repo_data[start:event + backs]
+        start = max(0, event - before_backs)
+        res = cur_repo_data[start:event + after_backs]
         before_res = res
         # padding dataframe
         start_idx = max(res.index)
-        end_idx = max(res.index) + backs * 2 - res.shape[0]
+        end_idx = max(res.index) + (before_backs+after_backs) - res.shape[0]
         for i in range(start_idx, end_idx):
             new_row = pd.DataFrame([[0] * len(res.columns)],
                                    columns=res.columns,
@@ -367,12 +368,12 @@ def get_event_window(cur_repo_data,
             res = pd.concat([res, new_row], ignore_index=False)
 
     elif aggr_options == Aggregate.only_before:
-        res = cur_repo_data[event[1] - backs - 1:event[1]-1]
+        res = cur_repo_data[event[1] - before_backs - 1:event[1]-1]
 
     elif aggr_options == Aggregate.none:
         res = cur_repo_data.reset_index().drop(
             ["created_at"],
-            axis=1).set_index("idx")[event[1] - backs:event[1] + befs]
+            axis=1).set_index("idx")[event[1] - before_backs:event[1] + after_backs]
 
     if res.shape[0] < 20:
         print(before_res.shape)
