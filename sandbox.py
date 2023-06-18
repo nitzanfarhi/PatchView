@@ -1,8 +1,89 @@
+
+# %%
+import wandb
+
+run = wandb.init()
+# %%
+
+from matplotlib import pyplot as plt
+from datasets import get_commit_from_repo
+
+import argparse
+import shap
+
+from models import *
+from msd import get_tokenizer
+from transformers import pipeline
+
+from results import get_all_predictions
+
+
+args = argparse.Namespace()
+args.code_artifact="nitzanfarhi/code4/run-ia1zinlc-test_table_0:v0"
+args.message_artifact="nitzanfarhi/message4/run-q8hktc1v-test_table_0:v0"
+args.event_artifact="nitzanfarhi/events4/run-agwcpmq1-test_table_0:v0"
+args.message_model = "nitzanfarhi/message4/Message_model_0.bin:v110"    
+args.fold = 0
+args.aggr = "avg"
+mall = get_all_predictions(args, run)
+
+
+args = argparse.Namespace()
+# wandb.init()
+args.message_model_type = "roberta"
+args.multi_message_model_artifact = "nitzanfarhi/message4/Message_model_0.bin:v110"
+args.message_tokenizer_name="roberta-base"
+args.message_model_name="roberta-base"
+args.model_cache_dir="cache_data/models"
+args.dropout = 0.1
+args.freeze_submodel_layers = True
+args.do_lower_case = False
+message_model = get_message_model(args)
+if args.multi_message_model_artifact:
+    initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
+
+tokenizer = get_tokenizer(args, args.message_model_type, args.message_tokenizer_name )
+model = pipeline("text-classification", model=message_model.encoder, tokenizer=tokenizer, device=0)
+explainer = shap.Explainer(model)
+
+commit_messages = []
+for i in range(len(mall)):
+    repo_name = mall.iloc[i]['Name']
+    repo_hash = mall.iloc[i]['Hash']
+    commit = get_commit_from_repo(os.path.join(r"D:\multisource\commits", repo_name), repo_hash)
+    if len(commit.msg) < tokenizer.model_max_length:
+        commit_messages.append(commit.msg)
+
+# Todo understand which label is which
+shap_values = explainer(commit_messages)
+# %%
+
+fig = shap.plots.bar(shap_values[:,:,0].mean(0), show=False, max_display=20,  order=shap.Explanation.argsort.flip)
+plt.title("Impactful words for label 0")
+# plt.show()
+run.log({"Label 0":wandb.Image(plt)})
+plt.show()
+# %%
+
+shap.plots.bar(shap_values[:,:,1].mean(0) , show=False, max_display=20,  order=shap.Explanation.argsort.flip)
+plt.title("Impactful words for label 1")
+run.log({"Label 1":wandb.Image(plt)})
+plt.show()
+
+
+# %%
+import pickle
+with open(r"cache_data\code\commits.json", 'rb') as f:
+    commit_info =  pickle.load(f)
+# %%
+
+test_commit_info = []
+
+shap.plots.bar(shap_values.abs.sum(0))
+
 # %%
 import importlib
 import msd
-import events_models
-importlib.reload(events_models)
 importlib.reload(msd)
 import argparse
 import os
