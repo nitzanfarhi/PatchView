@@ -205,6 +205,8 @@ class Conv1D(nn.Module):
         x = self.dense2(x)
         x = self.dropout(x)
         x = self.activation(x)
+        if self.args.cut_layers:
+            return x
 
         x = self.dense3(x)
         x = self.activation(x)
@@ -398,15 +400,26 @@ class CustomBERTModel(nn.Module):
         return loss, x
     
 
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        
+    def forward(self, x):
+        return x
+
 class XGlueModel(nn.Module):   
     def __init__(self, encoder,args):
         super(XGlueModel, self).__init__()
         self.encoder = encoder
         self.args=args
+        if self.args.cut_layers:
+            self.encoder.classifier.out_proj = Identity()
     
         
     def forward(self, input_ids=None,labels=None): 
         outputs=self.encoder(input_ids,attention_mask=input_ids.ne(1))[0]
+        if self.args.cut_layers:
+            return outputs
         logits=outputs
         prob=torch.sigmoid(logits)
         if labels is not None:
