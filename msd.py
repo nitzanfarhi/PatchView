@@ -107,6 +107,7 @@ def parse_args():
     parser.add_argument("--multi_model_type", type=str,
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
+    parser.add_argument("--cut_layers", action="store_true", help="cut layers for the multi model")
 
     parser.add_argument("--multi_code_model_artifact", type=str, default="", help="multi code model artifact")
     parser.add_argument("--multi_events_model_artifact", type=str, default="", help="multi events model artifact")
@@ -127,7 +128,7 @@ def parse_args():
     parser.add_argument("--code_merge_file",
                         action="store_true", help="code merge file")
     parser.add_argument("--code_model_type", type=str,
-                        default="roberta_classification", help="code model type")
+                        default="roberta", help="code model type")
     parser.add_argument("--code_embedding_type", "-cet",
                         default="simple", type=str)
     parser.add_argument("--code_model_name", default="microsoft/codebert-base", type=str,
