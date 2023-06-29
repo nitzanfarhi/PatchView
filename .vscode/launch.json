@@ -43,7 +43,7 @@
       "nitzanfarhi/MSD4/Events_model_0.bin:v5",
       "--multi_message_model_artifact",
       "nitzanfarhi/MSD4/Message_model_0.bin:v1",
-      "--freeze_submodel_layers",
+    //  "--freeze_submodel_layers",
       "--no_cuda"]
     }
     ,

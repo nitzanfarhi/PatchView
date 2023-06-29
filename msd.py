@@ -108,6 +108,8 @@ def parse_args():
                         default="multiv1", help="multi model type")
     parser.add_argument("--freeze_submodel_layers", action="store_true", help="freeze submodel layers")
     parser.add_argument("--cut_layers", action="store_true", help="cut layers for the multi model")
+    parser.add_argument("--multi_model_hidden_size_1", type=int, default=768, help="multi model hidden size 1")
+    parser.add_argument("--multi_model_hidden_size_2", type=int, default=64, help="multi model hidden size 2")
 
     parser.add_argument("--multi_code_model_artifact", type=str, default="", help="multi code model artifact")
     parser.add_argument("--multi_events_model_artifact", type=str, default="", help="multi events model artifact")
