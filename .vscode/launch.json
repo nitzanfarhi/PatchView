@@ -4,7 +4,49 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-
+    
+    {
+      "name": "Multi_new",
+      "type": "python",
+      "request": "launch",
+      "program": "msd.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args":
+      ["--balance_factor=0.7",
+      "--code_merge_file",
+      "--activation=tanh",
+      "--batch_size=8",
+      "--cache_dir=/storage/nitzan/cache_data/",
+      "--code_embedding_type=simple_with_comments",
+      "--dropout=0.2",
+      "--run_fold=0",
+      "--source_model=Multi",
+      "--weight_decay=0.0001",
+      "--learning_rate=1e-05",
+      "--message_model_name=roberta-base",
+      "--message_model_type=roberta",
+      "--message_tokenizer_name=roberta-base",
+      "--dropout=0.2",
+      "--early_stop_threshold=100",
+      "--epochs=284",
+      "--event_l1=883",
+      "--event_l2=100",
+      "--event_l3=114",
+      "--event_window_size_after=5",
+      "--event_window_size_before=15",
+      "--events_model_type=conv1d",
+      "--folds=10",
+      "--multi_code_model_artifact",
+      "nitzanfarhi/MSD4/Code_model_0.bin:v1",
+      "--multi_events_model_artifact",
+      "nitzanfarhi/MSD4/Events_model_0.bin:v5",
+      "--multi_message_model_artifact",
+      "nitzanfarhi/MSD4/Message_model_0.bin:v1",
+      "--freeze_submodel_layers",
+      "--no_cuda"]
+    }
+    ,
     {
       "name": "Multi",
       "type": "python",
@@ -129,11 +171,11 @@
         "--epochs",
         "10",
         "--batch_size",
-        "16",
+        "32",
         "--learning_rate",
-        "1e-5",
+        "3e-5",
         "-cet",
-        "sum",
+        "simple_with_comments",
         "--dropout","0.3",
     //   "--recreate_cache",
         "--code_merge_file",
@@ -143,7 +185,7 @@
         "Code",
         "--cache_dir", "/storage/nitzan/cache_data/",
         "--run_fold","0",
-
+        "--activation=relu",
       ]
     },
     {
