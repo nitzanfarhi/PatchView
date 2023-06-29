@@ -26,7 +26,7 @@ DELETE_TOKEN = '[DEL]'
 
 class TextDataset(Dataset):
 
-    def __init__(self, tokenizer, args, all_json, keys, embedding_type, balance=False):
+    def __init__(self, tokenizer, args, all_json, keys, embedding_type):
         logger.warning(f"Loading dataset")
         self.tokenizer = tokenizer
         self.args = args
@@ -61,34 +61,8 @@ class TextDataset(Dataset):
         self.commit_list = sorted(self.commit_list, key=lambda x: x['hash'])
         logger.warning(f"Number of commits: {len(self.commit_list)}")
         self.create_final_list()
-        if balance == True:
-            self.balance_data()
 
-    def balance_data(self):
-        pos_idxs = []
-        neg_idxs = []
 
-        for i, label in enumerate(self.final_list_labels):
-            if label == 1:
-                pos_idxs.append(i)
-            else:
-                neg_idxs.append(i)
-        min_idxs = min(len(pos_idxs), len(neg_idxs))
-        pos_idxs = pos_idxs[:min_idxs]
-        neg_idxs = neg_idxs[:min_idxs]
-
-        tmp_final_list_tensors = []
-        tmp_final_list_labels = []
-        tmp_final_commit_info = []
-        for i in range(len(self.final_list_labels)):
-            if i in pos_idxs or i in neg_idxs:
-                tmp_final_list_tensors.append(self.final_list_tensors[i])
-                tmp_final_list_labels.append(self.final_list_labels[i])
-                tmp_final_commit_info.append(self.final_commit_info[i])
-
-        self.final_list_tensors = tmp_final_list_tensors
-        self.final_list_labels = tmp_final_list_labels
-        self.final_commit_info = tmp_final_commit_info
 
     def get_commits(self):
         result = []
@@ -547,8 +521,6 @@ class EventsDataset(Dataset):
             torch.save((self.final_list_tensors, self.final_list_labels,
                        self.final_commit_info), self.current_path)
 
-        if balance == True:
-            self.balance_data()
 
     def create_list_of_hashes(self, all_json):
         repo_dict = {}
@@ -594,31 +566,7 @@ class EventsDataset(Dataset):
             except KeyError as e:
                 print(e)
 
-    def balance_data(self):
-        pos_idxs = []
-        neg_idxs = []
-
-        for i, label in enumerate(self.final_list_labels):
-            if label == 1:
-                pos_idxs.append(i)
-            else:
-                neg_idxs.append(i)
-        min_idxs = min(len(pos_idxs), len(neg_idxs))
-        pos_idxs = pos_idxs[:min_idxs]
-        neg_idxs = neg_idxs[: int(min_idxs * self.args.balance_factor)]
-
-        tmp_final_list_tensors = []
-        tmp_final_list_labels = []
-        tmp_final_commit_info = []
-        for i in range(len(self.final_list_labels)):
-            if i in pos_idxs or i in neg_idxs:
-                tmp_final_list_tensors.append(self.final_list_tensors[i])
-                tmp_final_list_labels.append(self.final_list_labels[i])
-                tmp_final_commit_info.append(self.final_commit_info[i])
-
-        self.final_list_tensors = tmp_final_list_tensors
-        self.final_list_labels = tmp_final_list_labels
-        self.final_commit_info = tmp_final_commit_info
+  
 
     def __len__(self):
         return len(self.final_list_tensors)
