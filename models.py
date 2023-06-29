@@ -140,13 +140,14 @@ class MultiModel(nn.Module):
         self.events_model = events_model
         self.args = args
         self.dropout = nn.Dropout(args.dropout)
-        if args.return_class:
+        if args.cut_layers:
+            # todo fix
+            self.classifier1 = nn.Linear(self.events_model.cut_layer_last_dim + 2*768, self.args.multi_model_hidden_size_1)
+            self.classifier2 = nn.Linear(self.args.multi_model_hidden_size_1, self.args.multi_model_hidden_size_2)
+            self.classifier3 = nn.Linear(self.args.multi_model_hidden_size_2, 2)
+        else:
             # 6 = 2 + 2 + 2
             self.classifier1 = nn.Linear(6, 2)
-        else:
-            # todo fix
-            self.classifier1 = nn.Linear(6, 64)
-            self.classifier2 = nn.Linear(64, 2)
         self.activation = nn.Tanh()
 
     def forward(self, data, labels=None):
@@ -156,9 +157,15 @@ class MultiModel(nn.Module):
         events = self.events_model(events)
         x = torch.cat([code, message, events], dim=1)
         x = x.reshape(code.shape[0], -1)
-        if self.args.return_class:
+        if self.args.cut_layers:
             x = self.classifier1(x)
             x = self.activation(x)
+            x = self.dropout(x)
+            x = self.classifier2(x)
+            x = self.activation(x)
+            x = self.dropout(x)
+            x = self.classifier3(x)
+
         else:
             x = self.classifier1(x)
             x = self.activation(x)
@@ -192,6 +199,11 @@ class Conv1D(nn.Module):
         self.dropout = nn.Dropout(p=args.dropout)
         self.activation = self.args.event_activation
         self.sigmoid = nn.Sigmoid()
+        if self.args.cut_layers:
+            self.cut_layer_last_dim = l3
+
+    def cut_layers(self):
+        pass
 
     def forward(self, x, labels=None):
         x = self.conv1d(x)
@@ -247,21 +259,26 @@ def get_multi_model(args, message_tokenizer = None, code_tokenizer = None):
     if args.multi_code_model_artifact:
         initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
 
+        
     events_model = get_events_model(args)
     if args.multi_events_model_artifact:
         initialize_model_from_wandb(args, events_model, args.multi_events_model_artifact)
+
     
     message_model = get_message_model(args)
     if args.multi_message_model_artifact:
         initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
 
+    if args.cut_layers:
+        code_model.cut_layers()
+        events_model.cut_layers()
+        message_model.cut_layers()
 
     if args.multi_model_type == "multiv1":
         model = MultiModel(code_model, message_model, events_model, args)
-    elif args.multi_model_type == "multiv2":
-        model = MultiModel(code_model, message_model, events_model, args)
     else:
-        model = MultiModel(code_model, message_model, events_model, args)
+        raise NotImplementedError
+        
 
     return model
 
@@ -280,15 +297,22 @@ def get_model(args, message_tokenizer=None, code_tokenizer=None):
     if args.source_model == "Code":
         model = get_code_model(args)
         model.encoder.resize_token_embeddings(len(code_tokenizer))
+        if args.cut_layers:
+            model.cut_layers()
 
     elif args.source_model == "Message":
         model = get_message_model(args)
+        if args.cut_layers:
+            model.cut_layers()
 
     elif args.source_model == "Events":
         model = get_events_model(args)
+        if args.cut_layers:
+            model.cut_layers()
 
     elif args.source_model == "Multi":
         model = get_multi_model(args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer)
+
     return model
 
 
@@ -412,8 +436,9 @@ class XGlueModel(nn.Module):
         super(XGlueModel, self).__init__()
         self.encoder = encoder
         self.args=args
-        if self.args.cut_layers:
-            self.encoder.classifier.out_proj = Identity()
+
+    def cut_layers(self):
+        self.encoder.classifier.out_proj = Identity()
     
         
     def forward(self, input_ids=None,labels=None): 
