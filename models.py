@@ -169,8 +169,6 @@ class MultiModel(nn.Module):
         else:
             x = self.classifier1(x)
             x = self.activation(x)
-            x = self.classifier2(x)
-            x = self.activation(x)
 
         prob = torch.sigmoid(x)
         if labels is not None:
