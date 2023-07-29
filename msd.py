@@ -529,7 +529,7 @@ def main(args):
         code_tokenizer = get_tokenizer(
             args, args.code_model_type, args.code_tokenizer_name)
         dataset = TextDataset(code_tokenizer, args, mall,
-                              mall.keys(), args.code_embedding_type, balance=False)
+                              mall.keys(), args.code_embedding_type)
         code_tokenizer = dataset.tokenizer
         args.return_class = True
         dataset = MyConcatDataset(args, code_dataset=dataset)
@@ -539,7 +539,7 @@ def main(args):
         message_tokenizer = get_tokenizer(
             args, args.message_model_type, args.message_tokenizer_name)
         dataset = TextDataset(message_tokenizer, args, mall,
-                              mall.keys(), args.message_embedding_type, balance=False)
+                              mall.keys(), args.message_embedding_type)
         args.return_class = True
         dataset = MyConcatDataset(args, message_dataset=dataset)
 
@@ -577,6 +577,34 @@ def main(args):
             best_acc = train(args, dataset, model, fold,
                              train_idx, run, eval_idx=val_idx)
             best_accs.append(best_acc)
+
+            import shap
+            dataset.is_train = True
+            train_dataloader = DataLoader(dataset, batch_size=args.train_batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
+            batch = next(iter(train_dataloader))
+            images, _ = batch
+            my_model = model.to('cpu')
+            e = shap.DeepExplainer(my_model, images[2].to('cpu'))
+            shap_values = e.shap_values(images[2].to('cpu'))
+            shap_val = np.array(shap_values)
+            shap_val = np.reshape(shap_val,(-1,int(shap_val.shape[2]),int(shap_val.shape[3])))
+            shap_abs = np.absolute(shap_val)
+            sum_0 = np.sum(shap_abs,axis=0)
+            f_names = dataset.events_dataset.cur_repo_column_names
+            x_pos = [i for i, _ in enumerate(f_names)]
+            from matplotlib import pyplot as plt
+            plt1 = plt.subplot(311)
+            plt1.barh(x_pos,sum_0[1])
+            plt1.set_yticks(x_pos)
+            plt1.set_yticklabels(f_names)
+            plt1.set_title("Yesterdays features (time-step 2)")
+            plt2 = plt.subplot(312,sharex=plt1)
+            plt2.barh(x_pos,sum_0[0])
+            plt2.set_yticks(x_pos)
+            plt2.set_yticklabels(f_names)
+            plt2.set_title("The day before yesterdays features(time-step 1)")
+            plt.tight_layout()
+            plt.show()
             test(args, model, dataset, val_idx, fold=fold)
             run.summary[f"best_acc"]  = max(best_accs)
 

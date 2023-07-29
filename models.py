@@ -169,8 +169,6 @@ class MultiModel(nn.Module):
         else:
             x = self.classifier1(x)
             x = self.activation(x)
-            x = self.classifier2(x)
-            x = self.activation(x)
 
         prob = torch.sigmoid(x)
         if labels is not None:
@@ -190,15 +188,24 @@ class Conv1D(nn.Module):
         self.xshape1 = xshape1
         self.xshape2 = xshape2
         # todo this is not correct!
-        self.conv1d = nn.Conv1d(xshape1, l1, kernel_size=2 )
-        self.max_pooling = nn.MaxPool1d(kernel_size=2)
-        self.flatten = nn.Flatten()
-        self.dense1 = nn.Linear(l1*((self.xshape2-1)//2), l2)
-        self.dense2 = nn.Linear(l2, l3)
-        self.dense3 = nn.Linear(l3, 2)
-        self.dropout = nn.Dropout(p=args.dropout)
-        self.activation = self.args.event_activation
-        self.sigmoid = nn.Sigmoid()
+        self.seq_layers = nn.Sequential(
+            nn.Conv1d(xshape1, l1, kernel_size=2 ),
+            nn.Tanh(),
+            nn.MaxPool1d(kernel_size=2),
+            nn.Flatten(),
+            nn.Linear(l1*((self.xshape2-1)//2), l2),
+            nn.Dropout(p=args.dropout),
+            nn.Tanh(),
+            nn.Linear(l2, l3),
+            nn.Dropout(p=args.dropout),
+            nn.Tanh(),
+        )
+        self.seq_layers2 = nn.Sequential(
+            nn.Linear(l3, 2),
+            nn.Tanh(),
+            nn.Dropout(p=args.dropout),
+            nn.Sigmoid()
+        )
         if self.args.cut_layers:
             self.cut_layer_last_dim = l3
 
@@ -206,26 +213,11 @@ class Conv1D(nn.Module):
         pass
 
     def forward(self, x, labels=None):
-        x = self.conv1d(x)
-        x = self.activation(x)
-        x = self.max_pooling(x)
-        x = self.flatten(x)
-        x = self.dense1(x)
-        x = self.dropout(x)
-        x = self.activation(x)
-        
-        x = self.dense2(x)
-        x = self.dropout(x)
-        x = self.activation(x)
+        x = self.seq_layers(x)
         if self.args.cut_layers:
             return x
 
-        x = self.dense3(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-
-        x = self.sigmoid(x)
-
+        x = self.seq_layers2(x)
         if labels is None:
             return x
         labels = labels.float()
