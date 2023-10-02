@@ -5,14 +5,14 @@ This repository contains code for TODO TODO
 ![PatchView Design](results/design3.drawio.png "a title")
 
 ## Folders
-Data: contains the raw datasets and script files for processing the datasets.
-Models: contains the models used in the repository.
-Results: contains the scripts used to gather the results from W&B and create figures for them.
-Sweeps: contains sweep configuartions for W&B.
+* Data: contains the raw datasets and script files for processing the datasets.
+* Models: contains the models used in the repository.
+* Results: contains the scripts used to gather the results from W&B and create figures for them.
+* Sweeps: contains sweep configuartions for W&B.
 
 ## Requirements
-python 3.10
-Pytorch 1.13
+* python 3.10
+* Pytorch 1.13
 
 
 ## Usage
