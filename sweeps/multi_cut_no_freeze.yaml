@@ -48,10 +48,10 @@ parameters:
     values: [0]
 
   epochs:
-    value: 100
+    value: 20
 
   batch_size:
-    values: [8,16,32]
+    values: [8]
 
 
   weight_decay:
@@ -74,9 +74,16 @@ parameters:
     values: ["tanh"]
 
   balance_factor:
-    values: [0.6]
+    values: [0.6,0.7,0.8]
+
+  multi_model_hidden_size_1:
+    min: 500
+    max: 1000
 
   
+  multi_model_hidden_size_2:
+      min: 30
+      max: 200
 
 
 

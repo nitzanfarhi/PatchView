@@ -552,6 +552,7 @@ class EventsDataset(Dataset):
                     continue
                 assert len(wanted_row) == 1, "Hash is not unique"
                 wanted_row = wanted_row[0]
+                self.cur_repo_column_names = cur_repo.columns
                 event_window = get_event_window(
                     cur_repo, wanted_row, before_backs=self.before_backs, after_backs=self.after_backs )
                 event_window = add_metadata(
