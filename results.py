@@ -11,8 +11,6 @@ import requests
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from functools import reduce
-from msd import get_tokenizer
-from datasets import get_commit_from_repo
 from transformers import pipeline
 
 from models import *
@@ -140,6 +138,9 @@ def save_language_compare(mall, run):
 
 
 def example_explainability(mall, run, message_model_name):
+    from msd import get_tokenizer
+    from datasets import get_commit_from_repo
+
     args = argparse.Namespace()
     # wandb.init()
     args.message_model_type = "roberta"
@@ -218,7 +219,26 @@ def parse_args():
     return args
 
 
+def generate_easy_graphs():
+    code_compare_data = [
+        ["Concat Encoding",	0.8253],
+        ["Concat with Comment Encoding",	0.8303],
+        ["Special Token Encoding",	0.8234],
+        ["Sequence Match Encoding",	0.816 ]
+    ]
+    plt.barh([x[0] for x in code_compare_data], [x[1] for x in code_compare_data])
+    # set y axis to 0.8
+    plt.xlim(0.8, 0.835)
+    # convert to horizontal graph 
+    # set image size 
+    plt.gcf().subplots_adjust(left=0.30)
+    plt.gcf().set_size_inches(10, 5)
+    plt.title("Code Encoding Comparison")
+    plt.xlabel("Accuracy")
+    plt.show()
+    
+    print("Finished code encoding comparison")
 if __name__ == "__main__":
     args = parse_args()
-    
-    show_results(args)
+    generate_easy_graphs()
+    # show_results(args)
