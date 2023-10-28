@@ -1,7 +1,14 @@
 # PatchView
 
 ## Intro
-This repository contains code for TODO TODO
+Common Vulnerabilities and Exposures (CVE) is a system for cataloging known security vulnerabilities in publicly released software or firmware. While it is standard procedure for developers to announce a CVE record post the identification and rectification of a software vulnerability, some developers choose to omit this step and merely update their repositories, keeping the vulnerabilities undisclosed. Such actions leave users uninformed and potentially at risk. To this end, we present PatchView, an innovative multi-modal system tailored for the classification of commits as security patches. The system draws upon three unique data modalities associated with a commit: 
+1) Time-series representation of developer behavioral data within the Git repository,
+2) Commit text messages, 
+3) The code content. 
+
+PatchView merges three single-modality sub-models, each adept at interpreting data from its designated source. A distinguishing feature of this solution is its ability to elucidate its predictions by examining the outputs of each sub-model, underscoring its interpretability. Notably, this research pioneers a language-agnostic methodology for security patch classification. Our evaluations indicate that the proposed solution can reveal concealed security patches with an accuracy of 94.52% and F-Score of 95.12%.
+
+
 ![PatchView Design](results/design3.drawio.png "a title")
 
 ## Folders
