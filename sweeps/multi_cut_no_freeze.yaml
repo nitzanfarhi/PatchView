@@ -73,9 +73,6 @@ parameters:
   event_activation:
     values: ["tanh"]
 
-  balance_factor:
-    values: [0.6,0.7,0.8]
-
   multi_model_hidden_size_1:
     min: 500
     max: 1000
