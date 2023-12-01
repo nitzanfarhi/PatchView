@@ -8,7 +8,7 @@ import collections
 import requests
 import os
 
-from misc import safe_mkdir
+from data.misc import safe_mkdir
 
 
 class RepoNotFoundError(BaseException):
