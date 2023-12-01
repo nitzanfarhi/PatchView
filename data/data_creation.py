@@ -8,7 +8,7 @@ import logging
 import urllib.request
 
 import pandas as pd
-import data_graphql
+import data.data_graphql
 from data.misc import safe_mkdir
 
 from pathlib import Path

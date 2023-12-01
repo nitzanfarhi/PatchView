@@ -9,13 +9,13 @@ import pandas as pd
 import random
 import pickle
 from data.misc import safe_mkdir
-from data_creation import gh_cve_dir, repo_metadata_filename
+from data.data_creation import gh_cve_dir, repo_metadata_filename
 from data.misc import find_best_accuracy, find_best_f1, EnumAction, safe_mkdir
 from data.misc import Repository, add_metadata
+import data.misc
 import sys
-import misc
 
-sys.modules['helper'] = misc
+sys.modules['helper'] = data.misc
 
 DATASET_DIRNAME = "ready_data/"
 event_types = [
