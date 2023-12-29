@@ -19,10 +19,10 @@ import random
 import numpy as np
 import torch
 import wandb
-from datasets import EventsDataset, MyConcatDataset, TextDataset
+from data.datasets import EventsDataset, MyConcatDataset, TextDataset
 from sklearn.model_selection import KFold
 from tqdm import tqdm
-from models import get_model
+from models.models import get_model
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import copy
 
