@@ -1,4 +1,5 @@
 """ Main script for training and evaluating models. """
+# pylint: disable=logging-format-interpolation
 # pylint: disable=logging-not-lazy
 # pylint: enable=logging-fstring-interpolation
 import logging
@@ -11,6 +12,8 @@ import torch
 import wandb
 import shap
 
+
+from matplotlib import pyplot as plt
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -89,7 +92,8 @@ def parse_args():
         type=int,
         help="Optional input sequence length after tokenization."
         "The training dataset will be truncated in block of this size for training."
-        "Default to the model max input length for single sentence inputs (take into account special tokens).",
+        "Default to the model max input length for single sentence inputs "
+        "(take into account special tokens).",
     )
 
     parser.add_argument(
@@ -384,7 +388,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 positives += 1
             else:
                 raise ValueError("label error")
-    logger.warning(f"dataset balance percentage: {positives / (positives + negatives)}")
+    logger.warning("dataset balance percentage: %s", positives / (positives + negatives))
     run.summary[f"balance_{fold}"] = positives / (positives + negatives)
 
     args.max_steps = args.epochs * len(train_dataloader)
@@ -459,10 +463,10 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     for idx in range(args.start_epoch, int(args.num_train_epochs)):
         train_dataset.is_train = True
         model.train()
-        bar = tqdm(train_dataloader, total=len(train_dataloader))
+        progress_bar = tqdm(train_dataloader, total=len(train_dataloader))
         tr_num = 0
         train_loss = 0
-        for step, batch in enumerate(bar):
+        for step, batch in enumerate(progress_bar):
             inputs = []
             for x in batch[0]:
                 if len(x) == 0:
@@ -487,7 +491,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 avg_loss = tr_loss
             avg_loss = round(train_loss / tr_num, 5)
             final_train_loss = avg_loss
-            bar.set_description("epoch {} loss {}".format(idx, avg_loss))
+            progress_bar.set_description(f"epoch {idx} loss {avg_loss}")
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 optimizer.step()
@@ -527,8 +531,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                             model.module if hasattr(model, "module") else model
                         )
                         output_dir = os.path.join(
-                            output_dir,
-                            "{}".format(f"{args.source_model}_model_{fold}.bin"),
+                            output_dir,f"{args.source_model}_model_{fold}.bin",
                         )
                         torch.save(model_to_save.state_dict(), output_dir)
                         logger.info("Saving model checkpoint to %s", output_dir)
@@ -552,6 +555,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
 
 def test(args, model, dataset, idx, fold=0):
+    """ Test the model."""
     dataset.is_train = False
     eval_dataloader = DataLoader(
         dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True
@@ -727,7 +731,7 @@ def main(args):
         if args.run_fold != -1 and args.run_fold != fold:
             continue
 
-        logger.warning("Running Fold {}".format(fold))
+        logger.warning(f"Running Fold {fold}")
         dataset.set_hashes(mall_keys_list[train_idx], is_train=True)
         dataset.set_hashes(mall_keys_list[val_idx], is_train=False)
 
@@ -766,7 +770,6 @@ def main(args):
             sum_0 = np.sum(shap_abs, axis=0)
             f_names = dataset.events_dataset.cur_repo_column_names
             x_pos = [i for i, _ in enumerate(f_names)]
-            from matplotlib import pyplot as plt
 
             plt1 = plt.subplot(311)
             plt1.barh(x_pos, sum_0[1])
