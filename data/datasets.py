@@ -242,21 +242,24 @@ class MyConcatDataset(torch.utils.data.Dataset):
         self.merged_labels = []
         self.final_commit_info = []
 
-        self.code_hash_list = None
-        self.message_hash_list = None
-        self.events_hash_list = None
+        self.code_hash_list = []
+        self.message_hash_list = []
+        self.events_hash_list = []
 
-        if code_dataset is not None:
+        if code_dataset:
             self.code_hash_list = [x["hash"] for x in code_dataset.final_commit_info]
-        if message_dataset is not None:
+
+        if message_dataset:
             self.message_hash_list = [
                 x["hash"] for x in message_dataset.final_commit_info
             ]
-        if events_dataset is not None:
+
+        if events_dataset:
             self.events_hash_list = [
                 x["hash"] for x in events_dataset.final_commit_info
             ]
 
+        self.hash_list = list(set(self.code_hash_list + self.message_hash_list))
         self.is_train = True
 
     def set_hashes(self, hash_list, is_train=True):
@@ -281,25 +284,24 @@ class MyConcatDataset(torch.utils.data.Dataset):
             try:
                 labels = []
                 infos = []
-                if self.code_hash_list is None:
-                    cur_code = {}
-                else:
+                
+                cur_code = {}
+                cur_message = {}
+                cur_events = {}
+
+                if self.code_hash_list:
                     code_idx = self.code_hash_list.index(commit_hash)
                     cur_code = self.code_dataset[code_idx][0]
                     labels.append(self.code_dataset[code_idx][1])
                     infos.append(self.code_dataset.final_commit_info[code_idx])
 
-                if self.message_hash_list is None:
-                    cur_message = {}
-                else:
+                if self.message_hash_list:
                     message_idx = self.message_hash_list.index(commit_hash)
                     cur_message = self.message_dataset[message_idx][0]
                     labels.append(self.message_dataset[message_idx][1])
                     infos.append(self.message_dataset.final_commit_info[message_idx])
 
-                if self.events_hash_list is None:
-                    cur_events = {}
-                else:
+                if self.events_hash_list:
                     events_idx = self.events_hash_list.index(commit_hash)
                     cur_events = self.events_dataset[events_idx][0]
                     labels.append(self.events_dataset[events_idx][1])
@@ -317,8 +319,8 @@ class MyConcatDataset(torch.utils.data.Dataset):
                     neg_cur_merged_labels.append(labels[0])
                     neg_cur_final_commit_info.append(infos[0])
 
-            except ValueError:
-                continue
+            except ValueError as e:
+                raise e
 
         min_idxs = min(len(pos_cur_merged_dataset), len(neg_cur_merged_dataset))
         pos_cur_merged_dataset = pos_cur_merged_dataset[:min_idxs]
