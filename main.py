@@ -724,7 +724,7 @@ def main(args):
     splits = KFold(n_splits=args.folds, shuffle=True, random_state=args.seed)
 
     best_accs = []
-    mall_keys_list = np.array(list(mall.keys()))
+    mall_keys_list = np.array(sorted(dataset.hash_list))
     for fold, (train_idx, val_idx) in enumerate(
         splits.split(np.arange(len(mall_keys_list)))
     ):
@@ -758,31 +758,8 @@ def main(args):
                 shuffle=True,
             )
             batch = next(iter(train_dataloader))
-            images, _ = batch
-            my_model = model.to("cpu")
-            e = shap.DeepExplainer(my_model, images[2].to("cpu"))
-            shap_values = e.shap_values(images[2].to("cpu"))
-            shap_val = np.array(shap_values)
-            shap_val = np.reshape(
-                shap_val, (-1, int(shap_val.shape[2]), int(shap_val.shape[3]))
-            )
-            shap_abs = np.absolute(shap_val)
-            sum_0 = np.sum(shap_abs, axis=0)
-            f_names = dataset.events_dataset.cur_repo_column_names
-            x_pos = [i for i, _ in enumerate(f_names)]
-
-            plt1 = plt.subplot(311)
-            plt1.barh(x_pos, sum_0[1])
-            plt1.set_yticks(x_pos)
-            plt1.set_yticklabels(f_names)
-            plt1.set_title("Yesterdays features (time-step 2)")
-            plt2 = plt.subplot(312, sharex=plt1)
-            plt2.barh(x_pos, sum_0[0])
-            plt2.set_yticks(x_pos)
-            plt2.set_yticklabels(f_names)
-            plt2.set_title("The day before yesterdays features(time-step 1)")
-            plt.tight_layout()
-            plt.show()
+            if args.source_model == "Multi":
+                feature_importance_analysis(dataset, model, batch[0])
             test(args, model, dataset, val_idx, fold=fold)
             run.summary["best_acc"] = max(best_accs)
 
@@ -798,6 +775,32 @@ def main(args):
             run.log_artifact(artifact)
 
     return {}
+
+def feature_importance_analysis(dataset, model, images):
+    my_model = model.to("cpu")
+    e = shap.DeepExplainer(my_model, images[2].to("cpu"))
+    shap_values = e.shap_values(images[2].to("cpu"))
+    shap_val = np.array(shap_values)
+    shap_val = np.reshape(
+                shap_val, (-1, int(shap_val.shape[2]), int(shap_val.shape[3]))
+            )
+    shap_abs = np.absolute(shap_val)
+    sum_0 = np.sum(shap_abs, axis=0)
+    f_names = dataset.events_dataset.cur_repo_column_names
+    x_pos = [i for i, _ in enumerate(f_names)]
+
+    plt1 = plt.subplot(311)
+    plt1.barh(x_pos, sum_0[1])
+    plt1.set_yticks(x_pos)
+    plt1.set_yticklabels(f_names)
+    plt1.set_title("Yesterdays features (time-step 2)")
+    plt2 = plt.subplot(312, sharex=plt1)
+    plt2.barh(x_pos, sum_0[0])
+    plt2.set_yticks(x_pos)
+    plt2.set_yticklabels(f_names)
+    plt2.set_title("The day before yesterdays features(time-step 1)")
+    plt.tight_layout()
+    plt.show()
 
 
 def get_multi_dataset(args, mall):

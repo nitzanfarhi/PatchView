@@ -6,3 +6,4 @@ pandas
 wandb
 matplotlib
 git2json
+shap
