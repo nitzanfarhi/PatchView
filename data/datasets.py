@@ -181,6 +181,8 @@ class TextDataset(Dataset):
 
         logger.warning("Create final list")
         for commit in (pbar := tqdm(self.commit_list[:], leave=False)):
+            if self.args.filter_repos !="" and commit["repo"] not in self.args.filter_repos:
+                continue
             token_arr_lst = handle_commit(
                 commit, self.tokenizer, self.args, embedding_type=self.embedding_type
             )

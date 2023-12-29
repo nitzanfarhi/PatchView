@@ -1,12 +1,6 @@
+""" Main script for training and evaluating models. """
+
 import logging
-
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.WARNING,
-)
-logger = logging.getLogger(__name__)
-
 import json
 import argparse
 import os
@@ -14,11 +8,14 @@ import random
 import numpy as np
 import torch
 import wandb
-from data.datasets import EventsDataset, MyConcatDataset, TextDataset
+import shap
+
 from sklearn.model_selection import KFold
-from tqdm import tqdm
-from models.models import get_model
 from torch.utils.data import DataLoader, SubsetRandomSampler
+from tqdm import tqdm
+
+from models.models import get_model
+from data.datasets import EventsDataset, MyConcatDataset, TextDataset
 
 from transformers import (
     get_linear_schedule_with_warmup,
@@ -31,17 +28,21 @@ from transformers import (
     OpenAIGPTConfig,
     OpenAIGPTLMHeadModel,
     OpenAIGPTTokenizer,
-    RobertaConfig,
     RobertaForSequenceClassification,
     RobertaTokenizer,
-    RobertaConfig,
     RobertaModel,
-    RobertaTokenizer,
+    RobertaConfig,
     DistilBertConfig,
     DistilBertForMaskedLM,
     DistilBertTokenizer,
 )
-import copy
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.WARNING,
+)
+logger = logging.getLogger(__name__)
 
 
 os.environ["WANDB_RUN_GROUP"] = "experiment-" + wandb.util.generate_id()
@@ -109,9 +110,10 @@ def parse_args():
         "--commit_repos_path", type=str, default=r"D:\multisource\commits"
     )
 
-    parser.add_argument("--hidden_size", type=int, default=768)
+    parser.add_argument("--filter_repos", type=str, default="")
 
     # Training parameters
+    parser.add_argument("--hidden_size", type=int, default=768)
     parser.add_argument("--dropout", type=float, default=0.1, help="dropout")
     parser.add_argument(
         "--epochs", type=int, default=50, help="number of epochs to train"
@@ -297,7 +299,6 @@ def evaluate(args, model, dataset, eval_idx=None):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
-    eval_sampler = SubsetRandomSampler(eval_idx)
     eval_dataloader = DataLoader(
         dataset, batch_size=args.eval_batch_size, num_workers=0, pin_memory=True
     )
@@ -336,14 +337,14 @@ def evaluate(args, model, dataset, eval_idx=None):
     best_acc = 0
     best_threshold = 0
     eval_loss = eval_loss / nb_eval_steps
-    perplexity = torch.tensor(eval_loss)
+    perplexity = torch.Tensor(eval_loss)
     for i in range(100):
         preds = logits[:, 0] > i / 100
         eval_acc = np.mean(labels == preds)
         if eval_acc > best_acc:
             best_acc = eval_acc
             best_threshold = i / 100
-    logger.warning("best threshold: {}".format(best_threshold))
+    logger.warning("best threshold: %s", best_threshold)
     result = {
         "eval_loss": float(perplexity),
         "eval_acc": round(best_acc, 4),
@@ -357,7 +358,6 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
     """Train the model"""
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    train_sampler = SubsetRandomSampler(idx)
 
     # print train_dataset label percentages
     negatives = 0
@@ -381,7 +381,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
             else:
                 raise ValueError("label error")
     logger.warning(
-        "dataset balance percentage: {}".format(positives / (positives + negatives))
+        "dataset balance percentage: {}" % (positives / (positives + negatives))
     )
     run.summary[f"balance_{fold}"] = positives / (positives + negatives)
 
@@ -470,7 +470,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 inputs = inputs[0]
 
             labels = batch[1].to(args.device)
-            loss, logits = model(inputs, labels)
+            loss, _ = model(inputs, labels)
 
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -492,7 +492,6 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 optimizer.zero_grad()
                 scheduler.step()
                 global_step += 1
-                output_flag = True
                 avg_loss = round(
                     np.exp((tr_loss - logging_loss) / (global_step - tr_nb)), 4
                 )
@@ -534,11 +533,11 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
                     wandb.log(
                         {
-                            f"epoch": idx,
-                            f"train_loss": final_train_loss,
+                            "epoch": idx,
+                            "train_loss": final_train_loss,
                             "global_step": global_step,
-                            f"eval_loss": results["eval_loss"],
-                            f"eval_acc": results["eval_acc"],
+                            "eval_loss": results["eval_loss"],
+                            "eval_acc": results["eval_acc"],
                         }
                     )
 
@@ -666,6 +665,9 @@ def main(args):
     if args.cache_dir:
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
 
+    if args.filter_repos!= "":
+        args.filter_repos = args.filter_repos.split(",")
+
     logger.warning("Training/evaluation parameters %s", args)
 
     args.code_activation = define_activation(args.code_activation)
@@ -739,8 +741,6 @@ def main(args):
             )
             best_accs.append(best_acc)
 
-            import shap
-
             dataset.is_train = True
             train_dataloader = DataLoader(
                 dataset,
@@ -778,11 +778,10 @@ def main(args):
             plt.tight_layout()
             plt.show()
             test(args, model, dataset, val_idx, fold=fold)
-            run.summary[f"best_acc"] = max(best_accs)
+            run.summary["best_acc"] = max(best_accs)
 
-            model_dir = os.path.join(
-                args.output_dir, "{}".format("checkpoint-best-acc")
-            )
+            model_dir = os.path.join(args.output_dir, "checkpoint-best-acc")
+            
             output_dir = os.path.join(
                 model_dir, f"{args.source_model}_model_{fold}.bin"
             )
@@ -796,6 +795,7 @@ def main(args):
 
 
 def get_multi_dataset(args, mall):
+    """ Get the multi dataset."""
     keys = sorted(list(mall.keys()))
 
     code_tokenizer = get_tokenizer(args, args.code_model_type, args.code_tokenizer_name)
