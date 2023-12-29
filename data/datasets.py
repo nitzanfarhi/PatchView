@@ -31,6 +31,7 @@ DELETE_TOKEN = "[DEL]"
 
 
 class TextDataset(Dataset):
+    """ Dataset for commit messages / code """
     def __init__(self, tokenizer, args, all_json, keys, embedding_type):
         logger.warning("Loading dataset")
         self.tokenizer = tokenizer
@@ -85,6 +86,7 @@ class TextDataset(Dataset):
         self.create_final_list()
 
     def get_commits(self):
+        """ Get commits from repos or from cache"""
         result = []
         positives = 0
         negatives = 0
