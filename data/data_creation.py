@@ -1,7 +1,10 @@
 import logging
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.WARNING)
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.WARNING,
+)
 logger = logging.getLogger(__name__)
 
 import argparse
@@ -18,7 +21,6 @@ from data.misc import safe_mkdir
 
 from pathlib import Path
 from urllib.parse import urlparse
-from git2json import *
 from datetime import datetime
 
 

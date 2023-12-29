@@ -136,7 +136,8 @@
         "--run_fold",
         "7",
         "--recreate_cache",
-        "--cache_dir=/storage/nitzan/cache_data"
+        "--cache_dir=/storage/nitzan/cache_data",
+        "--filter_repos=tensorflow/tensorflow",
       ]
     },
     {
