@@ -21,8 +21,10 @@ TEST_RATE = 0
 
 def get_benign_commits(repo, security_commits):
     cur_repo = COMMIT_REPO_PATH + "\\" + repo.replace("/", "_")
-    mall = subprocess.run("git rev-list --all --since=2015", stdout=subprocess.PIPE, cwd = cur_repo)
-    mall = mall.stdout.decode('utf-8').split("\n")
+    mall = subprocess.run(
+        "git rev-list --all --since=2015", stdout=subprocess.PIPE, cwd=cur_repo
+    )
+    mall = mall.stdout.decode("utf-8").split("\n")
     random.shuffle(mall)
     for commit in mall:
         if commit in security_commits:
@@ -42,7 +44,7 @@ def add_code_data_to_dict(file):
     after = ""
     if file.content_before is not None:
         try:
-            before = file.content_before.decode('utf-8')
+            before = file.content_before.decode("utf-8")
         except UnicodeDecodeError:
             return None
     else:
@@ -50,7 +52,7 @@ def add_code_data_to_dict(file):
 
     if file.content is not None:
         try:
-            after = file.content.decode('utf-8')
+            after = file.content.decode("utf-8")
         except UnicodeDecodeError:
             return None
     if "." not in file.filename:
@@ -70,6 +72,7 @@ def add_code_data_to_dict(file):
 
 def get_commit_from_repo(cur_repo, hash):
     from pydriller import Repository
+
     res = next(Repository(cur_repo, single=hash).traverse_commits())
     return res
 
@@ -77,7 +80,8 @@ def get_commit_from_repo(cur_repo, hash):
 def prepare_dict(repo, commit, label):
     try:
         commit = get_commit_from_repo(
-            os.path.join(COMMIT_REPO_PATH, repo.replace("/", "_")), commit)
+            os.path.join(COMMIT_REPO_PATH, repo.replace("/", "_")), commit
+        )
         final_dict = {}
         final_dict["name"] = commit.project_name
         final_dict["hash"] = commit.hash
@@ -121,16 +125,16 @@ def main():
     for a, b in tqdm(mall.items()):
         counter += 1
         new_mall[a] = b
-        if b['repo'] not in repo_set:
-            commit = get_benign_commits(b['repo'], mall.keys())
-            repo_set[b['repo']] = commit
+        if b["repo"] not in repo_set:
+            commit = get_benign_commits(b["repo"], mall.keys())
+            repo_set[b["repo"]] = commit
         for _ in range(2):
             try:
-                commit_hash = next(repo_set[b['repo']])
+                commit_hash = next(repo_set[b["repo"]])
                 if commit_hash in new_mall:
                     print(f"Already found {commit_hash}-{b['repo']}-{0}")
                     continue
-                new_mall[commit_hash] = {"label": 0, "repo": b['repo']}
+                new_mall[commit_hash] = {"label": 0, "repo": b["repo"]}
             except StopIteration:
                 continue
 
@@ -140,6 +144,7 @@ def main():
 
 class CommitNotFound(Exception):
     """Raised when the commit is not found"""
+
     pass
 
 
@@ -191,9 +196,10 @@ def split_by_repos(data):
     num_of_repos_testing = int(num_of_repos * TEST_RATE)
 
     training_keys = data_keys[:num_of_repos_training]
-    validation_keys = data_keys[num_of_repos_training:
-                                num_of_repos_training + num_of_repos_validation]
-    testing_keys = data_keys[num_of_repos_training + num_of_repos_validation:]
+    validation_keys = data_keys[
+        num_of_repos_training : num_of_repos_training + num_of_repos_validation
+    ]
+    testing_keys = data_keys[num_of_repos_training + num_of_repos_validation :]
 
     print(f"Training size: {num_of_repos_training}")
     print(f"Validation size: {num_of_repos_validation}")
@@ -203,7 +209,10 @@ def split_by_repos(data):
     validation_dict = {}
     testing_dict = {}
 
-    for dict, keys in zip([training_dict, validation_dict, testing_dict], [training_keys, validation_keys, testing_keys]):
+    for dict, keys in zip(
+        [training_dict, validation_dict, testing_dict],
+        [training_keys, validation_keys, testing_keys],
+    ):
         for repo in tqdm(keys):
             try:
                 dict[repo] = []

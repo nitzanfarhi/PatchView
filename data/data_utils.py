@@ -15,15 +15,31 @@ from data.misc import Repository, add_metadata
 import sys
 from data import misc
 
-sys.modules['helper'] = misc
+sys.modules["helper"] = misc
 
 DATASET_DIRNAME = "ready_data/"
 event_types = [
-    'PullRequestEvent', 'PushEvent', 'ReleaseEvent', 'DeleteEvent', 'issues',
-    'CreateEvent', 'releases', 'IssuesEvent', 'ForkEvent', 'WatchEvent',
-    'PullRequestReviewCommentEvent', 'stargazers', 'pullRequests', 'commits',
-    'CommitCommentEvent', 'MemberEvent', 'GollumEvent', 'IssueCommentEvent',
-    'forks', 'PullRequestReviewEvent', 'PublicEvent'
+    "PullRequestEvent",
+    "PushEvent",
+    "ReleaseEvent",
+    "DeleteEvent",
+    "issues",
+    "CreateEvent",
+    "releases",
+    "IssuesEvent",
+    "ForkEvent",
+    "WatchEvent",
+    "PullRequestReviewCommentEvent",
+    "stargazers",
+    "pullRequests",
+    "commits",
+    "CommitCommentEvent",
+    "MemberEvent",
+    "GollumEvent",
+    "IssueCommentEvent",
+    "forks",
+    "PullRequestReviewEvent",
+    "PublicEvent",
 ]
 
 
@@ -40,15 +56,18 @@ class Aggregate(Enum):
     only_before = "only_before"
 
 
-def make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days, hours,
-                      resample, metadata, comment):
+def make_new_dir_name(
+    aggr_options, backs, benign_vuln_ratio, days, hours, resample, metadata, comment
+):
     """
     :return: name of the directory to save the data in
     """
     comment = f"_{comment}" if comment else ""
     metadata = "_meta" if metadata else ""
     if aggr_options in [Aggregate.before_cve, Aggregate.only_before, Aggregate.none]:
-        name_template = f"{str(aggr_options)}_R{benign_vuln_ratio}_B{backs}{metadata}{comment}"
+        name_template = (
+            f"{str(aggr_options)}_R{benign_vuln_ratio}_B{backs}{metadata}{comment}"
+        )
     elif aggr_options == Aggregate.after_cve:
         name_template = f"{str(aggr_options)}_R{benign_vuln_ratio}_RE{resample}_H{hours}_D{days}{metadata}{comment}"
     else:
@@ -58,31 +77,45 @@ def make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days, hours,
     return name_template
 
 
-def extract_window(aggr_options, hours, days, resample, backs, file,
-                   window_lst, details_lst, cur_repo, cur_list, tag):
+def extract_window(
+    aggr_options,
+    hours,
+    days,
+    resample,
+    backs,
+    file,
+    window_lst,
+    details_lst,
+    cur_repo,
+    cur_list,
+    tag,
+):
     for cur in cur_list:
-        res = get_event_window(cur_repo,
-                               cur,
-                               aggr_options,
-                               days=days,
-                               hours=hours,
-                               backs=backs,
-                               resample=resample)
+        res = get_event_window(
+            cur_repo,
+            cur,
+            aggr_options,
+            days=days,
+            hours=hours,
+            backs=backs,
+            resample=resample,
+        )
         details = (file, cur, tag)
         window_lst.append(res)
         details_lst.append(details)
 
 
-def create_dataset(data_path,
-                   aggr_options,
-                   benign_vuln_ratio,
-                   hours,
-                   days,
-                   resample,
-                   backs,
-                   metadata=True,
-                   comment="",
-                   ):
+def create_dataset(
+    data_path,
+    aggr_options,
+    benign_vuln_ratio,
+    hours,
+    days,
+    resample,
+    backs,
+    metadata=True,
+    comment="",
+):
     """
 
     :param aggr_options: can be before, after or none, to decide how we agregate
@@ -96,13 +129,13 @@ def create_dataset(data_path,
     all_repos = []
     all_set = set()
     ignored = []
-    dirname = make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days,
-                                hours, resample, metadata, comment)
+    dirname = make_new_dir_name(
+        aggr_options, backs, benign_vuln_ratio, days, hours, resample, metadata, comment
+    )
     safe_mkdir(DATASET_DIRNAME)
     safe_mkdir(DATASET_DIRNAME + dirname)
     cve_dir = os.path.join(data_path, gh_cve_dir)
-    all_metadata = json.load(
-        open(os.path.join(data_path, repo_metadata_filename), 'r'))
+    all_metadata = json.load(open(os.path.join(data_path, repo_metadata_filename), "r"))
     counter = 0
     for file in (pbar := tqdm.tqdm(os.listdir(cve_dir)[:])):
 
@@ -119,26 +152,27 @@ def create_dataset(data_path,
         tqdm_update("read")
         if not os.path.exists(os.path.join(cve_dir, file + ".parquet")):
             try:
-                cur_repo = pd.read_csv(os.path.join(cve_dir, file + ".csv"),
-                                       low_memory=False,
-                                       parse_dates=['created_at'],
-                                       dtype={
-                                           "type": "string",
-                                           "name": "string",
-                                           "Hash": "string",
-                                           "Add": np.float64,
-                                           "Del": np.float64,
-                                           "Files": np.float64,
-                                           "Vuln": np.float64
-                })
+                cur_repo = pd.read_csv(
+                    os.path.join(cve_dir, file + ".csv"),
+                    low_memory=False,
+                    parse_dates=["created_at"],
+                    dtype={
+                        "type": "string",
+                        "name": "string",
+                        "Hash": "string",
+                        "Add": np.float64,
+                        "Del": np.float64,
+                        "Files": np.float64,
+                        "Vuln": np.float64,
+                    },
+                )
             except pd.errors.EmptyDataError:
                 continue
 
             cur_repo.to_parquet(os.path.join(cve_dir, file + ".parquet"))
 
         else:
-            cur_repo = pd.read_parquet(
-                os.path.join(cve_dir, file + ".parquet"))
+            cur_repo = pd.read_parquet(os.path.join(cve_dir, file + ".parquet"))
 
         if cur_repo.shape[0] < 100:
             ignored.append(file)
@@ -146,7 +180,7 @@ def create_dataset(data_path,
         cur_repo["Hash"] = cur_repo["Hash"].fillna("")
         cur_repo = cur_repo.fillna(0)
 
-        number_of_vulns = cur_repo[cur_repo['Vuln'] != 0].shape[0]
+        number_of_vulns = cur_repo[cur_repo["Vuln"] != 0].shape[0]
         if number_of_vulns == 0:
             ignored.append((file, number_of_vulns))
             continue
@@ -154,20 +188,20 @@ def create_dataset(data_path,
         if metadata:
             tqdm_update("add metadata")
             cur_repo = add_metadata(
-                data_path, all_metadata, cur_repo, file, repo_holder)
+                data_path, all_metadata, cur_repo, file, repo_holder
+            )
 
         tqdm_update("fix_repo_shape")
-        cur_repo = fix_repo_shape(all_set,
-                                  cur_repo,
-                                  metadata=metadata,
-                                  update=tqdm_update)
+        cur_repo = fix_repo_shape(
+            all_set, cur_repo, metadata=metadata, update=tqdm_update
+        )
 
-        vulns = cur_repo.index[cur_repo['Vuln'] == 1].tolist()
+        vulns = cur_repo.index[cur_repo["Vuln"] == 1].tolist()
         if not len(vulns):
             continue
-        benigns = cur_repo.index[cur_repo['Vuln'] == 0].tolist()
+        benigns = cur_repo.index[cur_repo["Vuln"] == 0].tolist()
         random.shuffle(benigns)
-        benigns = benigns[:benign_vuln_ratio * len(vulns)]
+        benigns = benigns[: benign_vuln_ratio * len(vulns)]
 
         # cur_repo = cur_repo.drop(["Vuln"], axis=1)
 
@@ -176,44 +210,68 @@ def create_dataset(data_path,
             # cur_repo = add_time_one_hot_encoding(cur_repo, with_idx=True)
             raise NotImplementedError
         elif aggr_options == Aggregate.before_cve:
-            cur_repo = cur_repo.reset_index().drop(["created_at"],
-                                                   axis=1).set_index("idx")
+            cur_repo = (
+                cur_repo.reset_index().drop(["created_at"], axis=1).set_index("idx")
+            )
 
-        extract_window(aggr_options, hours, days, resample, backs, file,
-                       repo_holder.vuln_lst, repo_holder.vuln_details,
-                       cur_repo, vulns, VULN_TAG)
+        extract_window(
+            aggr_options,
+            hours,
+            days,
+            resample,
+            backs,
+            file,
+            repo_holder.vuln_lst,
+            repo_holder.vuln_details,
+            cur_repo,
+            vulns,
+            VULN_TAG,
+        )
 
-        extract_window(aggr_options, hours, days, resample, backs, file,
-                       repo_holder.benign_lst, repo_holder.benign_details,
-                       cur_repo, benigns, BENIGN_TAG)
+        extract_window(
+            aggr_options,
+            hours,
+            days,
+            resample,
+            backs,
+            file,
+            repo_holder.benign_lst,
+            repo_holder.benign_details,
+            cur_repo,
+            benigns,
+            BENIGN_TAG,
+        )
 
         tqdm_update("pad")
         repo_holder.pad_repo()
 
         tqdm_update("save")
-        with open(DATASET_DIRNAME + dirname + "/" + repo_holder.file + ".pkl",
-                  'wb') as f:
+        with open(
+            DATASET_DIRNAME + dirname + "/" + repo_holder.file + ".pkl", "wb"
+        ) as f:
             pickle.dump(repo_holder, f)
 
         all_repos.append(repo_holder)
 
     assert all_repos
-    with open(DATASET_DIRNAME + dirname + "/column_names.pkl", 'wb') as f:
+    with open(DATASET_DIRNAME + dirname + "/column_names.pkl", "wb") as f:
         pickle.dump(cur_repo.columns, f)
     return all_repos, cur_repo.columns
 
 
-def extract_dataset(aggr_options=Aggregate.before_cve,
-                    benign_vuln_ratio=1,
-                    hours=0,
-                    days=10,
-                    resample=12,
-                    backs=20,
-                    cache=True,
-                    metadata=False,
-                    comment="",
-                    data_location=r"data_collection\data",
-                    cache_location=DATASET_DIRNAME):
+def extract_dataset(
+    aggr_options=Aggregate.before_cve,
+    benign_vuln_ratio=1,
+    hours=0,
+    days=10,
+    resample=12,
+    backs=20,
+    cache=True,
+    metadata=False,
+    comment="",
+    data_location=r"data_collection\data",
+    cache_location=DATASET_DIRNAME,
+):
     """
     :param aggr_options: Aggregate.none, Aggregate.before_cve, Aggregate.after_cve
     :param benign_vuln_ratio: ratio of benign to vuln events
@@ -225,54 +283,69 @@ def extract_dataset(aggr_options=Aggregate.before_cve,
     :return: a list of Repository objects and dir name
     """
 
-    dirname = make_new_dir_name(aggr_options, backs, benign_vuln_ratio, days,
-                                hours, resample, metadata, comment)
+    dirname = make_new_dir_name(
+        aggr_options, backs, benign_vuln_ratio, days, hours, resample, metadata, comment
+    )
     path_name = os.path.join(cache_location, dirname)
-    if (cache and os.path.isdir(path_name)
-            and len(os.listdir(path_name)) != 0
-            and os.path.isfile(os.path.join(path_name, "column_names.pkl"))):
-
+    if (
+        cache
+        and os.path.isdir(path_name)
+        and len(os.listdir(path_name)) != 0
+        and os.path.isfile(os.path.join(path_name, "column_names.pkl"))
+    ):
         logger.info(f"Loading Dataset {dirname}")
         all_repos = []
         try:
             for file in os.listdir(path_name):
-                with open(os.path.join(path_name, file), 'rb') as f:
+                with open(os.path.join(path_name, file), "rb") as f:
                     repo = pickle.load(f)
                     all_repos.append(repo)
             column_names = pickle.load(
-                open(os.path.join(path_name, "column_names.pkl"), 'rb'))
+                open(os.path.join(path_name, "column_names.pkl"), "rb")
+            )
         except AttributeError:
             logger.info(f"Malformed dataset - Creating Dataset {dirname}")
-            all_repos, column_names = create_dataset(data_location,
-                                                     aggr_options, benign_vuln_ratio, hours, days, resample, backs, metadata=metadata, comment=comment)
+            all_repos, column_names = create_dataset(
+                data_location,
+                aggr_options,
+                benign_vuln_ratio,
+                hours,
+                days,
+                resample,
+                backs,
+                metadata=metadata,
+                comment=comment,
+            )
     else:
         logger.info(f"Creating Dataset {dirname}")
-        all_repos, column_names = create_dataset(data_location,
-                                                 aggr_options,
-                                                 benign_vuln_ratio,
-                                                 hours,
-                                                 days,
-                                                 resample,
-                                                 backs,
-                                                 metadata=metadata,
-                                                 comment=comment)
+        all_repos, column_names = create_dataset(
+            data_location,
+            aggr_options,
+            benign_vuln_ratio,
+            hours,
+            days,
+            resample,
+            backs,
+            metadata=metadata,
+            comment=comment,
+        )
 
     return all_repos, dirname, column_names
 
 
 def fix_repo_idx(cur_repo):
-    cur_repo['created_at'] = pd.to_datetime(cur_repo['created_at'], utc=True)
+    cur_repo["created_at"] = pd.to_datetime(cur_repo["created_at"], utc=True)
 
     cur_repo = cur_repo[
-        ~cur_repo.duplicated(subset=['created_at', 'Vuln'], keep='first')]
+        ~cur_repo.duplicated(subset=["created_at", "Vuln"], keep="first")
+    ]
 
     cur_repo = cur_repo.set_index(["created_at"])
     cur_repo = cur_repo.sort_index()
     cur_repo = cur_repo[cur_repo.index.notnull()]
-    cur_repo['idx'] = range(len(cur_repo))
+    cur_repo["idx"] = range(len(cur_repo))
     cur_repo = cur_repo.reset_index().set_index(["created_at", "idx"])
-    cur_repo = cur_repo.reset_index().drop(
-        ["created_at"], axis=1).set_index("idx")
+    cur_repo = cur_repo.reset_index().drop(["created_at"], axis=1).set_index("idx")
     return cur_repo
 
 
@@ -284,16 +357,16 @@ def fix_repo_shape(cur_repo):
     :return: the fixed repo
     """
 
-    integer_fields = ['Add', 'Del', 'Files']
-    integer_fields += ['diskUsage']
+    integer_fields = ["Add", "Del", "Files"]
+    integer_fields += ["diskUsage"]
 
     for commit_change in integer_fields:
         if commit_change in cur_repo.columns:
             cur_repo[commit_change].fillna(0, inplace=True)
             cur_repo[commit_change] = cur_repo[commit_change].astype(int)
-            cur_repo[commit_change] = (cur_repo[commit_change] -
-                                       cur_repo[commit_change].mean()
-                                       ) / cur_repo[commit_change].std()
+            cur_repo[commit_change] = (
+                cur_repo[commit_change] - cur_repo[commit_change].mean()
+            ) / cur_repo[commit_change].std()
 
     cur_repo = add_type_one_hot_encoding(cur_repo)
 
@@ -311,19 +384,22 @@ def add_type_one_hot_encoding(df):
     :return: dataframe with type one hot encoding
     """
     type_one_hot = pd.get_dummies(
-        df.type.astype(pd.CategoricalDtype(categories=event_types)))
+        df.type.astype(pd.CategoricalDtype(categories=event_types))
+    )
     df = pd.concat([df, type_one_hot], axis=1)
     return df
 
 
-def get_event_window(cur_repo_data,
-                     event,
-                     aggr_options=Aggregate.before_cve,
-                     days=10,
-                     hours=10,
-                     before_backs=50,
-                     after_backs=50,
-                     resample=24):
+def get_event_window(
+    cur_repo_data,
+    event,
+    aggr_options=Aggregate.before_cve,
+    days=10,
+    hours=10,
+    before_backs=50,
+    after_backs=50,
+    resample=24,
+):
     """
     :param cur_repo_data: DataFrame that is processed
     :param event: list of events to get windows from
@@ -356,24 +432,26 @@ def get_event_window(cur_repo_data,
 
     elif aggr_options == Aggregate.before_cve:
         start = max(0, event - before_backs)
-        res = cur_repo_data[start:event + after_backs]
+        res = cur_repo_data[start : event + after_backs]
         before_res = res
         # padding dataframe
         start_idx = max(res.index)
-        end_idx = max(res.index) + (before_backs+after_backs) - res.shape[0]
+        end_idx = max(res.index) + (before_backs + after_backs) - res.shape[0]
         for i in range(start_idx, end_idx):
-            new_row = pd.DataFrame([[0] * len(res.columns)],
-                                   columns=res.columns,
-                                   index=[i])
+            new_row = pd.DataFrame(
+                [[0] * len(res.columns)], columns=res.columns, index=[i]
+            )
             res = pd.concat([res, new_row], ignore_index=False)
 
     elif aggr_options == Aggregate.only_before:
-        res = cur_repo_data[event[1] - before_backs - 1:event[1]-1]
+        res = cur_repo_data[event[1] - before_backs - 1 : event[1] - 1]
 
     elif aggr_options == Aggregate.none:
-        res = cur_repo_data.reset_index().drop(
-            ["created_at"],
-            axis=1).set_index("idx")[event[1] - before_backs:event[1] + after_backs]
+        res = (
+            cur_repo_data.reset_index()
+            .drop(["created_at"], axis=1)
+            .set_index("idx")[event[1] - before_backs : event[1] + after_backs]
+        )
 
     if res.shape[0] < 20:
         print(before_res.shape)
@@ -386,8 +464,7 @@ def pad_and_fix(all_repos):
     num_of_vulns = 0
     random.shuffle(all_repos)
     all_repos = [
-        repo for repo in all_repos
-        if getattr(repo, "get_num_of_vuln", None) is not None
+        repo for repo in all_repos if getattr(repo, "get_num_of_vuln", None) is not None
     ]
 
     for repo in all_repos:
@@ -409,7 +486,7 @@ def split_repos(repos, train_size):
     train_repo_counter = 0
     for repo in repos:
         cur_vuln_counter = repo.get_num_of_vuln()
-        if (vuln_counter + cur_vuln_counter < train_size):
+        if vuln_counter + cur_vuln_counter < train_size:
             train_repo_counter += 1
             train_repos.append(repo)
         else:
@@ -418,9 +495,7 @@ def split_repos(repos, train_size):
     return train_repos, test_repos, train_repo_counter
 
 
-def split_into_x_and_y(repos,
-                       with_details=False,
-                       remove_unimportant_features=False):
+def split_into_x_and_y(repos, with_details=False, remove_unimportant_features=False):
     """
     Split the repos into X and Y.
     """
