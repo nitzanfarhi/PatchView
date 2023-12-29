@@ -117,7 +117,7 @@
       "name": "Message",
       "type": "python",
       "request": "launch",
-      "program": "msd.py",
+      "program": "main.py",
       "console": "integratedTerminal",
       "justMyCode": false,
       "args": [
@@ -135,7 +135,8 @@
         "cache_data",
         "--run_fold",
         "7",
-        //    "--recreate_cache"
+        "--recreate_cache",
+        "--cache_dir=/storage/nitzan/cache_data"
       ]
     },
     {
