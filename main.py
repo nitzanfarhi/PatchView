@@ -1,5 +1,6 @@
 """ Main script for training and evaluating models. """
-
+# pylint: disable=logging-not-lazy
+# pylint: enable=logging-fstring-interpolation
 import logging
 import json
 import argparse
@@ -11,11 +12,8 @@ import wandb
 import shap
 
 from sklearn.model_selection import KFold
-from torch.utils.data import DataLoader, SubsetRandomSampler
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-from models.models import get_model
-from data.datasets import EventsDataset, MyConcatDataset, TextDataset
 
 from transformers import (
     get_linear_schedule_with_warmup,
@@ -36,6 +34,9 @@ from transformers import (
     DistilBertForMaskedLM,
     DistilBertTokenizer,
 )
+
+from models.models import get_model
+from data.datasets import EventsDataset, MyConcatDataset, TextDataset
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -60,6 +61,7 @@ MODEL_CLASSES = {
 
 
 def parse_args():
+    """handle user arguments."""
     parser = argparse.ArgumentParser()
 
     # Data Related arguments
@@ -282,6 +284,7 @@ def parse_args():
 
 
 def set_seed(seed=42):
+    """Set all seeds to make results reproducible."""
     random.seed(seed)
     os.environ["PYHTONHASHSEED"] = str(seed)
     np.random.seed(seed)
@@ -290,7 +293,8 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 
-def evaluate(args, model, dataset, eval_idx=None):
+def evaluate(args, model, dataset):
+    """Evaluate the model."""
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_output_dir = args.output_dir
 
@@ -337,7 +341,7 @@ def evaluate(args, model, dataset, eval_idx=None):
     best_acc = 0
     best_threshold = 0
     eval_loss = eval_loss / nb_eval_steps
-    perplexity = torch.Tensor(eval_loss)
+    perplexity = torch.tensor(eval_loss)
     for i in range(100):
         preds = logits[:, 0] > i / 100
         eval_acc = np.mean(labels == preds)
@@ -380,9 +384,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
                 positives += 1
             else:
                 raise ValueError("label error")
-    logger.warning(
-        "dataset balance percentage: {}" % (positives / (positives + negatives))
-    )
+    logger.warning(f"dataset balance percentage: {positives / (positives + negatives)}")
     run.summary[f"balance_{fold}"] = positives / (positives + negatives)
 
     args.max_steps = args.epochs * len(train_dataloader)
@@ -501,7 +503,7 @@ def train(args, train_dataset, model, fold, idx, run, eval_idx=None):
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
                     train_dataset.is_train = False
-                    results = evaluate(args, model, train_dataset, eval_idx=eval_idx)
+                    results = evaluate(args, model, train_dataset)
                     train_dataset.is_train = True
 
                     logger.warning(f"eval_loss {float(results['eval_loss'])}")
@@ -564,10 +566,8 @@ def test(args, model, dataset, idx, fold=0):
 
     # Eval!
     logger.info("***** Running Test *****")
-    logger.info("  Num examples = %d", len(idx))
-    logger.info("  Batch size = %d", args.eval_batch_size)
-    eval_loss = 0.0
-    nb_eval_steps = 0
+    logger.info(f"  Num examples = {len(idx)}")
+    logger.info(f"  Batch size = {args.eval_batch_size}")
     model.eval()
     logits = []
     labels = []
@@ -614,6 +614,7 @@ def test(args, model, dataset, idx, fold=0):
 
 
 def get_tokenizer(args, model_type, tokenizer_name):
+    """Gets the relevant tokenizer"""
     _, _, tokenizer_class = MODEL_CLASSES[model_type]
     tokenizer = tokenizer_class.from_pretrained(
         tokenizer_name,
@@ -626,6 +627,7 @@ def get_tokenizer(args, model_type, tokenizer_name):
 
 
 def define_activation(cur_activation):
+    """Gets the relevant activation function"""
     if cur_activation == "tanh":
         return torch.nn.Tanh()
     elif cur_activation == "relu":
@@ -639,6 +641,7 @@ def define_activation(cur_activation):
 
 
 def main(args):
+    """Main function"""
     device = torch.device(
         "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
     )
@@ -665,7 +668,7 @@ def main(args):
     if args.cache_dir:
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
 
-    if args.filter_repos!= "":
+    if args.filter_repos != "":
         args.filter_repos = args.filter_repos.split(",")
 
     logger.warning("Training/evaluation parameters %s", args)
@@ -781,7 +784,7 @@ def main(args):
             run.summary["best_acc"] = max(best_accs)
 
             model_dir = os.path.join(args.output_dir, "checkpoint-best-acc")
-            
+
             output_dir = os.path.join(
                 model_dir, f"{args.source_model}_model_{fold}.bin"
             )
@@ -795,7 +798,7 @@ def main(args):
 
 
 def get_multi_dataset(args, mall):
-    """ Get the multi dataset."""
+    """Get the multi dataset."""
     keys = sorted(list(mall.keys()))
 
     code_tokenizer = get_tokenizer(args, args.code_model_type, args.code_tokenizer_name)

@@ -1,6 +1,8 @@
-from data.misc import add_metadata
-from torch.utils.data import Dataset, DataLoader
-from data.data_utils import fix_repo_idx, fix_repo_shape, get_event_window
+""" Dataset classes for code and commit message data. """
+# pylint: enable=logging-fstring-interpolation
+# pylint: disable=logging-not-lazy
+
+from torch.utils.data import Dataset
 from tqdm import tqdm
 import torch
 import pandas as pd
@@ -9,6 +11,9 @@ import os
 import json
 import difflib
 import logging
+
+from data.misc import add_metadata
+from data.data_utils import fix_repo_idx, fix_repo_shape, get_event_window
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +32,7 @@ DELETE_TOKEN = "[DEL]"
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, args, all_json, keys, embedding_type):
-        logger.warning(f"Loading dataset")
+        logger.warning("Loading dataset")
         self.tokenizer = tokenizer
         self.args = args
         self.cache = not args.recreate_cache
@@ -38,10 +43,17 @@ class TextDataset(Dataset):
         self.final_commit_info = []
         self.keys = keys
         self.all_json = all_json
-        self.commit_path = os.path.join(args.cache_dir, "code", f"commits.json")
-        self.final_cache_list = os.path.join(
-            args.cache_dir, "code", f"{self.embedding_type}_final_list.pickle"
-        )
+        self.commit_path = os.path.join(args.cache_dir, "code", "commits.json")
+        if self.args.filter_repos != "":
+            self.final_cache_list = os.path.join(
+                args.cache_dir,
+                "code",
+                f"{self.embedding_type}_final_list_{self.args.filter_repos}.pickle",
+            )
+        else:
+            self.final_cache_list = os.path.join(
+                args.cache_dir, "code", f"{self.embedding_type}_final_list.pickle"
+            )
         self.positive_label_counter = 0
         self.negative_label_counter = 0
         self.commit_repos_path = args.commit_repos_path
@@ -181,7 +193,10 @@ class TextDataset(Dataset):
 
         logger.warning("Create final list")
         for commit in (pbar := tqdm(self.commit_list[:], leave=False)):
-            if self.args.filter_repos !="" and commit["repo"] not in self.args.filter_repos:
+            if (
+                self.args.filter_repos != ""
+                and commit["repo"] not in self.args.filter_repos
+            ):
                 continue
             token_arr_lst = handle_commit(
                 commit, self.tokenizer, self.args, embedding_type=self.embedding_type
@@ -260,14 +275,14 @@ class MyConcatDataset(torch.utils.data.Dataset):
 
         # ugly but easy
         labels_counter = [0, 0]
-        for hash in tqdm(hash_list):
+        for commit_hash in tqdm(hash_list):
             try:
                 labels = []
                 infos = []
                 if self.code_hash_list is None:
                     cur_code = {}
                 else:
-                    code_idx = self.code_hash_list.index(hash)
+                    code_idx = self.code_hash_list.index(commit_hash)
                     cur_code = self.code_dataset[code_idx][0]
                     labels.append(self.code_dataset[code_idx][1])
                     infos.append(self.code_dataset.final_commit_info[code_idx])
@@ -275,7 +290,7 @@ class MyConcatDataset(torch.utils.data.Dataset):
                 if self.message_hash_list is None:
                     cur_message = {}
                 else:
-                    message_idx = self.message_hash_list.index(hash)
+                    message_idx = self.message_hash_list.index(commit_hash)
                     cur_message = self.message_dataset[message_idx][0]
                     labels.append(self.message_dataset[message_idx][1])
                     infos.append(self.message_dataset.final_commit_info[message_idx])
@@ -283,7 +298,7 @@ class MyConcatDataset(torch.utils.data.Dataset):
                 if self.events_hash_list is None:
                     cur_events = {}
                 else:
-                    events_idx = self.events_hash_list.index(hash)
+                    events_idx = self.events_hash_list.index(commit_hash)
                     cur_events = self.events_dataset[events_idx][0]
                     labels.append(self.events_dataset[events_idx][1])
                     infos.append(self.events_dataset.final_commit_info[events_idx])
@@ -356,10 +371,10 @@ class MyConcatDataset(torch.utils.data.Dataset):
             return len(self.val_merged_dataset)
 
 
-def get_commit_from_repo(cur_repo, hash):
+def get_commit_from_repo(cur_repo, commit_hash):
     from pydriller import Repository
 
-    return next(Repository(cur_repo, single=hash).traverse_commits())
+    return next(Repository(cur_repo, single=commit_hash).traverse_commits())
 
 
 def convert_to_ids_and_pad(source_tokens, tokenizer, args):
@@ -608,12 +623,12 @@ class EventsDataset(Dataset):
             os.path.join(self.args.cache_dir, "events", "repo_metadata.json"), "r"
         ) as f:
             all_metadata = json.load(f)
-        for mhash in tqdm(list(self.hash_list)[:], leave=False):
+        for commit_hash in tqdm(list(self.hash_list)[:], leave=False):
             try:
-                if mhash == "":
+                if commit_hash == "":
                     continue
-                repo = all_json[mhash]["repo"]
-                label = all_json[mhash]["label"]
+                repo = all_json[commit_hash]["repo"]
+                label = all_json[commit_hash]["label"]
                 repo_name = repo.replace("/", "_")
                 if repo_name not in repo_dict:
                     try:
@@ -634,7 +649,7 @@ class EventsDataset(Dataset):
                 else:
                     cur_repo = repo_dict[repo_name]
 
-                wanted_row = cur_repo.index[cur_repo["Hash"] == mhash].tolist()
+                wanted_row = cur_repo.index[cur_repo["Hash"] == commit_hash].tolist()
                 if len(wanted_row) == 0:
                     continue
                 assert len(wanted_row) == 1, "Hash is not unique"
@@ -654,7 +669,7 @@ class EventsDataset(Dataset):
                 self.final_list_tensors.append(event_window.values)
                 self.final_list_labels.append(label)
                 self.final_commit_info.append(
-                    {"name": repo_name, "hash": mhash, "label": label}
+                    {"name": repo_name, "hash": commit_hash, "label": label}
                 )
 
             except KeyError as e:

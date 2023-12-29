@@ -137,7 +137,7 @@
         "7",
         "--recreate_cache",
         "--cache_dir=/storage/nitzan/cache_data",
-        "--filter_repos=tensorflow/tensorflow",
+        "--filter_repos=tensorflow_tensorflow",
       ]
     },
     {
