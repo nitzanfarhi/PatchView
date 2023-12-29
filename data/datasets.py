@@ -14,6 +14,7 @@ import logging
 
 from data.misc import add_metadata
 from data.data_utils import fix_repo_idx, fix_repo_shape, get_event_window
+from data.code_utils import ext_to_comment
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ DELETE_TOKEN = "[DEL]"
 
 
 class TextDataset(Dataset):
-    """ Dataset for commit messages / code """
+    """Dataset for commit messages / code"""
+
     def __init__(self, tokenizer, args, all_json, keys, embedding_type):
         logger.warning("Loading dataset")
         self.tokenizer = tokenizer
@@ -86,7 +88,7 @@ class TextDataset(Dataset):
         self.create_final_list()
 
     def get_commits(self):
-        """ Get commits from repos or from cache"""
+        """Get commits from repos or from cache"""
         result = []
         positives = 0
         negatives = 0
@@ -259,7 +261,9 @@ class MyConcatDataset(torch.utils.data.Dataset):
                 x["hash"] for x in events_dataset.final_commit_info
             ]
 
-        self.hash_list = list(set(self.code_hash_list + self.message_hash_list))
+        self.hash_list = list(
+            set(self.code_hash_list + self.message_hash_list + self.events_hash_list)
+        )
         self.is_train = True
 
     def set_hashes(self, hash_list, is_train=True):
@@ -284,7 +288,7 @@ class MyConcatDataset(torch.utils.data.Dataset):
             try:
                 labels = []
                 infos = []
-                
+
                 cur_code = {}
                 cur_message = {}
                 cur_events = {}
@@ -466,8 +470,6 @@ def embed_file(file, tokenizer, args):
 
 
 def get_line_comment(language):
-    from code_utils import ext_to_comment
-
     if language in ext_to_comment:
         return ext_to_comment[language] + " "
     else:
@@ -591,11 +593,18 @@ class EventsDataset(Dataset):
         self.final_list_labels = []
         self.final_commit_info = []
 
-        self.current_path = os.path.join(
-            args.cache_dir,
-            "events",
-            f"events_{self.before_backs}_{self.after_backs}.json",
-        )
+        if self.args.filter_repos != "":
+            self.current_path = os.path.join(
+                args.cache_dir,
+                "events",
+                f"events_{self.before_backs}_{self.after_backs}_{self.args.filter_repos}.json",
+            )
+        else:
+            self.current_path = os.path.join(
+                args.cache_dir,
+                "events",
+                f"events_{self.before_backs}_{self.after_backs}.json",
+            )
         self.timezones_path = os.path.join(args.cache_dir, "events", "timezones")
         self.cache = not args.recreate_cache
         self.hash_list = keys
@@ -634,6 +643,11 @@ class EventsDataset(Dataset):
                 repo = all_json[commit_hash]["repo"]
                 label = all_json[commit_hash]["label"]
                 repo_name = repo.replace("/", "_")
+                if (
+                    self.args.filter_repos != ""
+                    and repo_name not in self.args.filter_repos
+                ):
+                    continue
                 if repo_name not in repo_dict:
                     try:
                         cur_repo = pd.read_parquet(
