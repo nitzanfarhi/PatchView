@@ -117,6 +117,7 @@ def parse_args():
     )
 
     parser.add_argument("--filter_repos", type=str, default="")
+    parser.add_argument("--use_patchdb_commits", action='store_true', help="use only commits from patchdb")
 
     # Training parameters
     parser.add_argument("--hidden_size", type=int, default=768)
@@ -642,7 +643,16 @@ def define_activation(cur_activation):
         return torch.nn.LeakyReLU()
     else:
         raise NotImplementedError
+    
 
+def get_patchdb_repos():
+    from datasets import load_dataset
+    patchdb = load_dataset("sunlab/patch_db")
+    patchdb.set_format("pandas")
+    patchdb = patchdb['train']
+    patchdb = patchdb.to_pandas()
+    patchdb_repos = set(patchdb['owner']+"_"+patchdb['repo'])
+    return patchdb_repos
 
 def main(args):
     """Main function"""
@@ -672,8 +682,14 @@ def main(args):
     if args.cache_dir:
         args.model_cache_dir = os.path.join(args.cache_dir, "models")
 
+    if args.filter_repos != "" and args.use_patchdb_commits:
+        raise ValueError("Cannot use both filter_repos and use_patchdb_commits")
+
     if args.filter_repos != "":
         args.filter_repos = args.filter_repos.split(",")
+    
+    if args.use_patchdb_commits:
+        args.filter_repos = get_patchdb_repos()
 
     logger.warning("Training/evaluation parameters %s", args)
 
