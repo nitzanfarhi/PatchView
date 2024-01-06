@@ -48,10 +48,15 @@ class TextDataset(Dataset):
         self.all_json = all_json
         self.commit_path = os.path.join(args.cache_dir, "code", "commits.json")
         if self.args.filter_repos != "":
+            if len(self.args.filter_repos) == 1:
+                filter_repo_name  = self.args.filter_repos[0]
+            else:
+                filter_repo_name = hash(frozenset(self.args.filter_repos))
+
             self.final_cache_list = os.path.join(
                 args.cache_dir,
                 "code",
-                f"{self.embedding_type}_final_list_{self.args.filter_repos}.pickle",
+                f"{self.embedding_type}_final_list_{filter_repo_name}.pickle",
             )
         else:
             self.final_cache_list = os.path.join(
