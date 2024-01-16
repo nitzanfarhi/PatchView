@@ -740,7 +740,7 @@ def main(args):
     splits = KFold(n_splits=args.folds, shuffle=True, random_state=args.seed)
 
     best_accs = []
-    mall_keys_list = np.array(sorted(dataset.hash_list))
+    mall_keys_list = np.array(sorted(mall.keys()))
     for fold, (train_idx, val_idx) in enumerate(
         splits.split(np.arange(len(mall_keys_list)))
     ):
