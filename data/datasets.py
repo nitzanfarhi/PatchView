@@ -299,18 +299,24 @@ class MyConcatDataset(torch.utils.data.Dataset):
                 cur_events = {}
 
                 if self.code_hash_list:
+                    if commit_hash not in self.code_hash_list:
+                        continue
                     code_idx = self.code_hash_list.index(commit_hash)
                     cur_code = self.code_dataset[code_idx][0]
                     labels.append(self.code_dataset[code_idx][1])
                     infos.append(self.code_dataset.final_commit_info[code_idx])
 
                 if self.message_hash_list:
+                    if commit_hash not in self.message_hash_list:
+                        continue
                     message_idx = self.message_hash_list.index(commit_hash)
                     cur_message = self.message_dataset[message_idx][0]
                     labels.append(self.message_dataset[message_idx][1])
                     infos.append(self.message_dataset.final_commit_info[message_idx])
 
                 if self.events_hash_list:
+                    if commit_hash not in self.events_hash_list:
+                        continue
                     events_idx = self.events_hash_list.index(commit_hash)
                     cur_events = self.events_dataset[events_idx][0]
                     labels.append(self.events_dataset[events_idx][1])
