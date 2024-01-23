@@ -40,6 +40,7 @@ from transformers import (
 
 from models.models import get_model
 from data.datasets import EventsDataset, MyConcatDataset, TextDataset
+from data.datasets import get_patchdb_repos
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -645,15 +646,7 @@ def define_activation(cur_activation):
         raise NotImplementedError
     
 
-def get_patchdb_repos():
-    from datasets import load_dataset
-    patchdb = load_dataset("sunlab/patch_db")
-    patchdb.set_format("pandas")
-    patchdb = patchdb['train']
-    patchdb = patchdb.to_pandas()
-    patchdb_repos = set(patchdb['owner']+"_"+patchdb['repo'])
-    return patchdb_repos
-
+    
 def main(args):
     """Main function"""
     device = torch.device(
@@ -667,6 +660,7 @@ def main(args):
 
     args.eval_batch_size = args.batch_size
     args.train_batch_size = args.batch_size
+    filtered_repos = ""
 
     args.per_gpu_train_batch_size = args.batch_size // args.n_gpu
     args.per_gpu_eval_batch_size = args.batch_size // args.n_gpu
@@ -686,10 +680,10 @@ def main(args):
         raise ValueError("Cannot use both filter_repos and use_patchdb_commits")
 
     if args.filter_repos != "":
-        args.filter_repos = args.filter_repos.split(",")
+        filtered_repos = args.filter_repos.split(",")
     
     if args.use_patchdb_commits:
-        args.filter_repos = get_patchdb_repos()
+        filtered_repos = get_patchdb_repos()
 
     logger.warning("Training/evaluation parameters %s", args)
 
@@ -707,7 +701,7 @@ def main(args):
             args, args.code_model_type, args.code_tokenizer_name
         )
         dataset = TextDataset(
-            code_tokenizer, args, mall, mall.keys(), args.code_embedding_type
+            code_tokenizer, args, mall, mall.keys(), args.code_embedding_type, filtered_repos
         )
         code_tokenizer = dataset.tokenizer
         args.return_class = True
@@ -718,13 +712,13 @@ def main(args):
             args, args.message_model_type, args.message_tokenizer_name
         )
         dataset = TextDataset(
-            message_tokenizer, args, mall, mall.keys(), args.message_embedding_type
+            message_tokenizer, args, mall, mall.keys(), args.message_embedding_type, filtered_repos
         )
         args.return_class = True
         dataset = MyConcatDataset(args, message_dataset=dataset)
 
     elif args.source_model == "Events":
-        dataset = EventsDataset(args, mall, mall.keys(), balance=True)
+        dataset = EventsDataset(args, mall, mall.keys(), filtered_repos, balance=True)
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True

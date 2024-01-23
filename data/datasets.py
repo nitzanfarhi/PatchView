@@ -34,7 +34,7 @@ DELETE_TOKEN = "[DEL]"
 class TextDataset(Dataset):
     """Dataset for commit messages / code"""
 
-    def __init__(self, tokenizer, args, all_json, keys, embedding_type):
+    def __init__(self, tokenizer, args, all_json, keys, embedding_type, filtered_repos):
         logger.warning("Loading dataset")
         self.tokenizer = tokenizer
         self.args = args
@@ -47,12 +47,9 @@ class TextDataset(Dataset):
         self.keys = keys
         self.all_json = all_json
         self.commit_path = os.path.join(args.cache_dir, "code", "commits.json")
-        if self.args.filter_repos != "":
-            if len(self.args.filter_repos) == 1:
-                filter_repo_name  = self.args.filter_repos[0]
-            else:
-                filter_repo_name = hash(frozenset(self.args.filter_repos))
-
+        self.filter_repos = filtered_repos
+        if self.filter_repos != "":
+            filter_repo_name = create_repo_indicator_name()
             self.final_cache_list = os.path.join(
                 args.cache_dir,
                 "code",
@@ -203,8 +200,8 @@ class TextDataset(Dataset):
         logger.warning("Create final list")
         for commit in (pbar := tqdm(self.commit_list[:], leave=False)):
             if (
-                self.args.filter_repos != ""
-                and commit["repo"] not in self.args.filter_repos
+                self.filter_repos != ""
+                and commit["repo"] not in self.filter_repos
             ):
                 continue
             token_arr_lst = handle_commit(
@@ -596,19 +593,20 @@ def handle_commit(commit, tokenizer, args, embedding_type="concat"):
 
 
 class EventsDataset(Dataset):
-    def __init__(self, args, all_json, keys, balance=False):
+    def __init__(self, args, all_json, keys, filtered_repos, balance=False):
         self.args = args
         self.before_backs = args.event_window_size_before
         self.after_backs = args.event_window_size_after
         self.final_list_tensors = []
         self.final_list_labels = []
         self.final_commit_info = []
-
-        if self.args.filter_repos != "":
+        self.filter_repos = filtered_repos
+        if self.filter_repos != "":
+            filter_repo_name = create_repo_indicator_name(self.filter_repos)
             self.current_path = os.path.join(
                 args.cache_dir,
                 "events",
-                f"events_{self.before_backs}_{self.after_backs}_{self.args.filter_repos}.json",
+                f"events_{self.before_backs}_{self.after_backs}_{filter_repo_name}.json",
             )
         else:
             self.current_path = os.path.join(
@@ -655,8 +653,8 @@ class EventsDataset(Dataset):
                 label = all_json[commit_hash]["label"]
                 repo_name = repo.replace("/", "_")
                 if (
-                    self.args.filter_repos != ""
-                    and repo_name not in self.args.filter_repos
+                    self.filter_repos != ""
+                    and repo_name not in self.filter_repos
                 ):
                     continue
                 if repo_name not in repo_dict:
@@ -730,3 +728,16 @@ def create_datasets(
             pickle.dump(cur_set, open(f"{set_name}_dataset.pkl", "wb"))
         res.append(cur_set)
     return res
+
+def get_patchdb_repos():
+    with open("/storage/nitzan/patchdb/patch_db.json",'r') as mfile:
+        patchdb = mfile.read()
+        patchdb_dict = json.loads(patchdb)
+    return set([a['repo']+'_'+a['owner'] for a in patchdb_dict])
+
+def create_repo_indicator_name(filter_repos):
+    if len(filter_repos) == 1:
+        filter_repo_name  = filter_repos[0]
+    else:
+        filter_repo_name = hash(frozenset(filter_repos))
+    return filter_repo_name
