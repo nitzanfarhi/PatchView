@@ -20,7 +20,7 @@ command:
   - "--cut_layers"
   - ${args}
 
-program: msd.py
+program: main.py
 method: bayes
 metric:
   name: eval_acc

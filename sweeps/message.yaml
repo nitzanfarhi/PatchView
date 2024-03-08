@@ -5,7 +5,7 @@ command:
   - "--recreate_cache"
   - ${args}
 
-program: msd.py
+program: main.py
 method: bayes
 metric:
   name: eval_acc
@@ -47,3 +47,9 @@ parameters:
 
   message_model_type:
     values: ["roberta"]
+
+  cache_dir:
+    values: ["/storage/nitzan/cache_data/"]
+
+  filter_repos:
+    values: ["tensorflow_tensorflow"]  
