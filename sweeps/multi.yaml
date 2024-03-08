@@ -5,7 +5,7 @@ command:
   - "--code_merge_file"
   - ${args}
 
-program: msd.py
+program: main.py
 method: bayes
 metric:
   name: eval_acc

@@ -1,4 +1,4 @@
-program: msd.py
+program: main.py
 method: bayes
 metric:
   name: eval_acc
@@ -56,7 +56,11 @@ parameters:
 
   events_model_type:
     values: ["conv1d"]
-  
+
+  filter_repos:
+    values: ["tensorflow_tensorflow"]  
 
   early_stop_threshold:
     values: [100]
+
+  
