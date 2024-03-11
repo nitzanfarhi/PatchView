@@ -17,6 +17,11 @@ PatchView merges three single-modality sub-models, each adept at interpreting da
 * Results: contains the scripts used to gather the results from W&B and create figures for them.
 * Sweeps: contains sweep configuartions for W&B.
 
+## Setup
+```bash
+python3 data\data_creation.py --all
+```
+
 ## Requirements
 * python 3.10
 * Pytorch 1.13
