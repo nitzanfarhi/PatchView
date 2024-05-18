@@ -34,7 +34,7 @@ DELETE_TOKEN = "[DEL]"
 class TextDataset(Dataset):
     """Dataset for commit messages / code"""
 
-    def __init__(self, tokenizer, args, all_json, keys, embedding_type, filtered_repos):
+    def __init__(self, tokenizer, args, all_json, keys, embedding_type, filter_repos):
         logger.warning("Loading dataset")
         self.tokenizer = tokenizer
         self.args = args
@@ -47,9 +47,13 @@ class TextDataset(Dataset):
         self.keys = keys
         self.all_json = all_json
         self.commit_path = os.path.join(args.cache_dir, "code", "commits.json")
-        self.filter_repos = filtered_repos
+        
+        self.added_lines_statistics = 0
+        self.deleted_lines_statistics = 0
+        
+        self.filter_repos = filter_repos
         if self.filter_repos != "":
-            filter_repo_name = create_repo_indicator_name()
+            filter_repo_name = create_repo_indicator_name(filter_repos)
             self.final_cache_list = os.path.join(
                 args.cache_dir,
                 "code",
@@ -183,6 +187,115 @@ class TextDataset(Dataset):
             return final_dict
         return final_dict
 
+    def handle_commit(self, commit, tokenizer, args, embedding_type="concat"):
+        res = []
+        file_counter = 0
+        for file in commit["files"]:
+            self.added_lines_statistics += len(file["added"])
+            self.deleted_lines_statistics += len(file["deleted"])
+
+            added = [diff[1] for diff in file["added"]]
+            deleted = [diff[1] for diff in file["deleted"]]
+            if len("".join(added) + "".join(deleted)) > args.block_size:
+                continue
+
+            if embedding_type == "sum":
+                embed_file_res = embed_file(file, tokenizer, args)
+                if embed_file_res is not None:
+                    res += embed_file_res
+
+            elif embedding_type == "simple":
+                if args.code_merge_file:
+                    res.append((added, deleted))
+                else:
+                    file_res = " ".join(added + deleted)
+                    file_res = tokenizer(
+                        file_res,
+                        truncation=True,
+                        padding="max_length",
+                        max_length=args.block_size,
+                    )
+                    res.append(file_res)
+
+            elif embedding_type == "simple_with_tokens":
+                added = (
+                    [ADD_TOKEN]
+                    + [diff[1] for diff in file["added"]]
+                    + [tokenizer.sep_token]
+                )
+                deleted = [DEL_TOKEN] + [diff[1] for diff in file["deleted"]]
+
+                if args.code_merge_file:
+                    res.append((added, deleted))
+                else:
+                    file_res = " ".join(added + deleted)
+                    file_res = tokenizer(
+                        file_res,
+                        truncation=True,
+                        padding="max_length",
+                        max_length=args.block_size,
+                    )
+                    res.append(file_res)
+
+            elif embedding_type == "simple_with_comments":
+                added = [diff[1] for diff in file["added"]]
+                deleted = [
+                    get_line_comment(file["filetype"]) + diff[1] for diff in file["deleted"]
+                ]
+
+                if args.code_merge_file:
+                    res.append((added, deleted))
+                else:
+                    file_res = " \n ".join(added + deleted)
+                    file_res = tokenizer(
+                        file_res,
+                        truncation=True,
+                        padding="max_length",
+                        max_length=args.block_size,
+                    )
+                    res.append(file_res)
+
+            elif embedding_type == "commit_message":
+                file_res = tokenizer(
+                    commit["message"],
+                    truncation=True,
+                    padding="max_length",
+                    max_length=args.block_size,
+                )
+                res.append(file_res)
+
+            file_counter += 1
+
+            # Probably at this point we have too many changes and we should stop
+            if file_counter > args.block_size and args.code_merge_file:
+                break
+
+        if args.code_merge_file and res != []:
+            if embedding_type == "sum":
+                res = tokenizer(
+                    " ".join(res),
+                    truncation=True,
+                    padding="max_length",
+                    max_length=args.block_size,
+                )
+                return [res]
+            else:
+                added_lst = []
+                deleted_lst = []
+                for added, deleted in res:
+                    added_lst += added
+                    deleted_lst += deleted
+                file_res = " ".join(added_lst + deleted_lst)
+                file_res = tokenizer(
+                    file_res,
+                    truncation=True,
+                    padding="max_length",
+                    max_length=args.block_size,
+                )
+                return [file_res]
+
+        return res
+
     def create_final_list(self):
         import gc
 
@@ -204,7 +317,7 @@ class TextDataset(Dataset):
                 and commit["repo"] not in self.filter_repos
             ):
                 continue
-            token_arr_lst = handle_commit(
+            token_arr_lst = self.handle_commit(
                 commit, self.tokenizer, self.args, embedding_type=self.embedding_type
             )
 
@@ -249,6 +362,7 @@ class MyConcatDataset(torch.utils.data.Dataset):
         self.code_hash_list = []
         self.message_hash_list = []
         self.events_hash_list = []
+
 
         if code_dataset:
             self.code_hash_list = [x["hash"] for x in code_dataset.final_commit_info]
@@ -484,123 +598,16 @@ def get_line_comment(language):
         return "// "
 
 
-def handle_commit(commit, tokenizer, args, embedding_type="concat"):
-    res = []
-    file_counter = 0
-    for file in commit["files"]:
-        if len("".join(["added"]) + "".join(["deleted"])) > args.block_size:
-            continue
-
-        if embedding_type == "sum":
-            embed_file_res = embed_file(file, tokenizer, args)
-            if embed_file_res is not None:
-                res += embed_file_res
-
-        elif embedding_type == "simple":
-            added = [diff[1] for diff in file["added"]]
-            deleted = [diff[1] for diff in file["deleted"]]
-
-            if args.code_merge_file:
-                res.append((added, deleted))
-            else:
-                file_res = " ".join(added + deleted)
-                file_res = tokenizer(
-                    file_res,
-                    truncation=True,
-                    padding="max_length",
-                    max_length=args.block_size,
-                )
-                res.append(file_res)
-
-        elif embedding_type == "simple_with_tokens":
-            added = (
-                [ADD_TOKEN]
-                + [diff[1] for diff in file["added"]]
-                + [tokenizer.sep_token]
-            )
-            deleted = [DEL_TOKEN] + [diff[1] for diff in file["deleted"]]
-
-            if args.code_merge_file:
-                res.append((added, deleted))
-            else:
-                file_res = " ".join(added + deleted)
-                file_res = tokenizer(
-                    file_res,
-                    truncation=True,
-                    padding="max_length",
-                    max_length=args.block_size,
-                )
-                res.append(file_res)
-
-        elif embedding_type == "simple_with_comments":
-            added = [diff[1] for diff in file["added"]]
-            deleted = [
-                get_line_comment(file["filetype"]) + diff[1] for diff in file["deleted"]
-            ]
-
-            if args.code_merge_file:
-                res.append((added, deleted))
-            else:
-                file_res = " \n ".join(added + deleted)
-                file_res = tokenizer(
-                    file_res,
-                    truncation=True,
-                    padding="max_length",
-                    max_length=args.block_size,
-                )
-                res.append(file_res)
-
-        elif embedding_type == "commit_message":
-            file_res = tokenizer(
-                commit["message"],
-                truncation=True,
-                padding="max_length",
-                max_length=args.block_size,
-            )
-            res.append(file_res)
-
-        file_counter += 1
-
-        # Probably at this point we have too many changes and we should stop
-        if file_counter > args.block_size and args.code_merge_file:
-            break
-
-    if args.code_merge_file and res != []:
-        if embedding_type == "sum":
-            res = tokenizer(
-                " ".join(res),
-                truncation=True,
-                padding="max_length",
-                max_length=args.block_size,
-            )
-            return [res]
-        else:
-            added_lst = []
-            deleted_lst = []
-            for added, deleted in res:
-                added_lst += added
-                deleted_lst += deleted
-            file_res = " ".join(added_lst + deleted_lst)
-            file_res = tokenizer(
-                file_res,
-                truncation=True,
-                padding="max_length",
-                max_length=args.block_size,
-            )
-            return [file_res]
-
-    return res
-
 
 class EventsDataset(Dataset):
-    def __init__(self, args, all_json, keys, filtered_repos, balance=False):
+    def __init__(self, args, all_json, keys, filter_repos, balance=False):
         self.args = args
         self.before_backs = args.event_window_size_before
         self.after_backs = args.event_window_size_after
         self.final_list_tensors = []
         self.final_list_labels = []
         self.final_commit_info = []
-        self.filter_repos = filtered_repos
+        self.filter_repos = filter_repos
         if self.filter_repos != "":
             filter_repo_name = create_repo_indicator_name(self.filter_repos)
             self.current_path = os.path.join(
@@ -736,6 +743,8 @@ def get_patchdb_repos():
     return set([a['repo']+'_'+a['owner'] for a in patchdb_dict])
 
 def create_repo_indicator_name(filter_repos):
+    if type(filter_repos) is str:
+        filter_repo_name = [filter_repos]
     if len(filter_repos) == 1:
         filter_repo_name  = filter_repos[0]
     else:
