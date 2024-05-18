@@ -660,7 +660,7 @@ def main(args):
 
     args.eval_batch_size = args.batch_size
     args.train_batch_size = args.batch_size
-    filtered_repos = ""
+    filter_repos = ""
 
     args.per_gpu_train_batch_size = args.batch_size // args.n_gpu
     args.per_gpu_eval_batch_size = args.batch_size // args.n_gpu
@@ -680,10 +680,10 @@ def main(args):
         raise ValueError("Cannot use both filter_repos and use_patchdb_commits")
 
     if args.filter_repos != "":
-        filtered_repos = args.filter_repos.split(",")
+        filter_repos = args.filter_repos.split(",")
     
     if args.use_patchdb_commits:
-        filtered_repos = get_patchdb_repos()
+        filter_repos = get_patchdb_repos()
 
     logger.warning("Training/evaluation parameters %s", args)
 
@@ -701,7 +701,7 @@ def main(args):
             args, args.code_model_type, args.code_tokenizer_name
         )
         dataset = TextDataset(
-            code_tokenizer, args, mall, mall.keys(), args.code_embedding_type, filtered_repos
+            code_tokenizer, args, mall, mall.keys(), args.code_embedding_type, filter_repos
         )
         code_tokenizer = dataset.tokenizer
         args.return_class = True
@@ -712,13 +712,13 @@ def main(args):
             args, args.message_model_type, args.message_tokenizer_name
         )
         dataset = TextDataset(
-            message_tokenizer, args, mall, mall.keys(), args.message_embedding_type, filtered_repos
+            message_tokenizer, args, mall, mall.keys(), args.message_embedding_type, filter_repos
         )
         args.return_class = True
         dataset = MyConcatDataset(args, message_dataset=dataset)
 
     elif args.source_model == "Events":
-        dataset = EventsDataset(args, mall, mall.keys(), filtered_repos, balance=True)
+        dataset = EventsDataset(args, mall, mall.keys(), filter_repos, balance=True)
         args.xshape1 = dataset[0][0].shape[0]
         args.xshape2 = dataset[0][0].shape[1]
         args.return_class = True
@@ -819,19 +819,23 @@ def get_multi_dataset(args, mall):
 
     code_tokenizer = get_tokenizer(args, args.code_model_type, args.code_tokenizer_name)
     code_dataset = TextDataset(
-        code_tokenizer, args, mall, keys, args.code_embedding_type
+        code_tokenizer, args, mall, keys, args.code_embedding_type, args.filter_repos
     )
+
+    logger.warning("Overall added lines: %s" ,code_dataset.added_lines_statistics)
+    logger.warning("Overall deleted lines: %s" ,code_dataset.deleted_lines_statistics)
+
     code_tokenizer = code_dataset.tokenizer
 
     message_tokenizer = get_tokenizer(
         args, args.message_model_type, args.message_tokenizer_name
     )
     message_dataset = TextDataset(
-        message_tokenizer, args, mall, keys, args.message_embedding_type
+        message_tokenizer, args, mall, keys, args.message_embedding_type, args.filter_repos
     )
     message_tokenizer = message_dataset.tokenizer
 
-    events_dataset = EventsDataset(args, mall, keys)
+    events_dataset = EventsDataset(args, mall, keys, args.filter_repos)
     args.xshape1 = events_dataset[0][0].shape[0]
     args.xshape2 = events_dataset[0][0].shape[1]
     concat_dataset = MyConcatDataset(
@@ -840,7 +844,6 @@ def get_multi_dataset(args, mall):
         message_dataset=message_dataset,
         events_dataset=events_dataset,
     )
-
     return concat_dataset, code_tokenizer, message_tokenizer
 
 
