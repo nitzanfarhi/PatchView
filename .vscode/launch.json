@@ -5,8 +5,17 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Create Data",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "data/data_creation.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": ["--cve","--commits","--output-dir","linux","--filter-repo","torvalds/linux","--filter-time","2023-2024"]
+    },
+    {
       "name": "Debug not my code",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
@@ -14,7 +23,7 @@
     },
     {
       "name": "Multi_new",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "main.py",
       "console": "integratedTerminal",
@@ -50,7 +59,7 @@
     },
     {
       "name": "Multi",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "main.py",
       "console": "integratedTerminal",
@@ -89,12 +98,11 @@
         "--multi_events_model_artifact=nitzanfarhi/MSD4/Events_model_7.bin:v5",
         "--multi_message_model_artifact=nitzanfarhi/MSD4/Message_model_7.bin:v7",
         "--filter_repos=tensorflow_tensorflow",
-
       ]
     },
     {
       "name": "Results",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "results.py",
       "console": "integratedTerminal",
@@ -112,7 +120,7 @@
     },
     {
       "name": "Message",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "main.py",
       "console": "integratedTerminal",
@@ -128,13 +136,14 @@
         "roberta-base",
         "--message_tokenizer_name",
         "roberta-base",
-        "--cache_dir",
-        "cache_data",
+        // "--cache_dir",
+        // "cache_data",
         "--run_fold",
         "7",
         "--recreate_cache",
         "--cache_dir=/storage/nitzan/cache_data",
-        "--filter_repos=tensorflow_tensorflow",
+        "--multi_message_model_artifact=nitzanfarhi/MSD4/Message_model_7.bin:v7",
+        // "--filter_repos=tensorflow_tensorflow",
       ]
     },
     {
@@ -170,7 +179,7 @@
         "--weight_decay",
         "0.001",
         "--cache_dir=/storage/nitzan/cache_data",
-      //  "--recreate_cache",
+        //  "--recreate_cache",
         "--filter_repos=tensorflow_tensorflow",
       ]
     },
@@ -215,7 +224,6 @@
       "justMyCode": false,
       // "args": [ ]
     },
-
     {
       "name": "PatchDB_Message",
       "type": "python",
