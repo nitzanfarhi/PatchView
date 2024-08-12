@@ -589,9 +589,7 @@ def run_query(query, ignore_errors=False):
 
 
 def safe_mkdir(dirname):
-    with contextlib.suppress(FileExistsError):
-        os.mkdir(dirname)
-
+    os.makedirs(dirname, exist_ok=True)
 
 def timing(f):
     @wraps(f)

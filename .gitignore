@@ -19,3 +19,4 @@ test_table.table.json/*
 output/*
 .vscode/ltex.hiddenFalsePositives.en-US.txt
 .ipynb_checkpoints/*
+linux/*
