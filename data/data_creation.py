@@ -16,12 +16,14 @@ import traceback
 import urllib.request
 
 import pandas as pd
-from data import data_graphql
-from data.misc import safe_mkdir
+import data_graphql
+from misc import safe_mkdir
 
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime
+
+from git2json import run_git_log, git2jsons
 
 
 GITHUB_ARCHIVE_DIRNAME = "gharchive"
@@ -212,7 +214,7 @@ def ref_parser(ref_row):
         with contextlib.suppress(ValueError):
             key, val = ref.split(":", 1)
             key = key.replace(" ", "")
-            if "github" in val.lower():
+            if "github" in val.lower() or "git.kernel.org" in val.lower():
                 has_github_ref = 1
             if key in ret_dict:
                 ret_dict[key].append(val)
@@ -304,55 +306,94 @@ def yearly_preprocess(output_dir, repo_list):
             day_df = day_df.fillna(0)
         day_df.to_csv(f"{output_dir}/{repo_name.replace('/', '_')}.csv")
 
+def convert_linux_to_github(url):
+    # "https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=0f7352557a35ab7888bc7831411ec8a3cbe20d78"
+    group = "torvalds"
+    proj = "linux"
+    commit = "commit"
+    query_params = parse_qs(url.query)
+    commit_hash = ''
+
+    if 'id' in query_params and len(query_params['id']) > 0:
+        commit_hash =  query_params['id'][0].replace(" ","")
+
+    if url.path.startswith('/stable/c'):
+        commit_hash = url.path.split('/stable/c/')[1]
+
+    if commit_hash != '':
+        return (group, proj, commit, commit_hash)
+    
+    return (None,None, None, None)
+
 
 def parse_url(var):
     url = urlparse(var.lower())
     path = url.path + "/"
     commit_hash = ""
+    if url.hostname == "git.kernel.org":
+        return convert_linux_to_github(url)
     if url.hostname != "github.com":
         return (None, None, None, None)
     if "/pull/" in path:
         if path.count("/") == 6:
             _, group, proj, pull, pull_num, commit, _ = path.split("/", maxsplit=6)
         else:
-            _, group, proj, pull, pull_num, commit, commit_hash, _ = path.split(
-                "/", maxsplit=7
-            )
+            try:
+                _, group, proj, pull, pull_num, commit, commit_hash, _ = path.split(
+                    "/", maxsplit=7
+                )
+            except ValueError:
+                return (None, None, None, None)
+ 
     else:
-        _, group, proj, commit, commit_hash, _ = path.split("/", maxsplit=5)
+        try:
+            _, group, proj, commit, commit_hash, _ = path.split("/", maxsplit=5)
+        except ValueError:
+            return (None, None, None, None)
 
     return group, proj, commit.replace(" ", ""), commit_hash
 
+def check_if_cve_within_date_frame(filter_time, cve):
+    start_date,end_date = filter_time.split("-")
+    cve_date = cve.split("-")[1]
+    return cve_date >= start_date and cve_date < end_date
 
-def extract_commits_from_projects_gh(cves):
+
+def extract_commits_from_projects_gh(cves, filter_repo, filter_time):
     repo_commits = {}
     for _, row in cves[cves["has_github"] == 1].iterrows():
         for github_var in github_list:
             for var in row[github_var]:
-                if "/commit" in var.lower():
-                    group, proj, commit, commit_hash = parse_url(var)
-                    if commit is None:
-                        logger.debug(f"Unable to parse {var}")
-                        continue
+                group, proj, commit, commit_hash = parse_url(var)
+                if commit is None:
+                    logger.debug(f"Unable to parse {var}")
+                    continue
 
-                    if commit in ["compare", "blob"]:
-                        logger.debug(f"Unable to parse {var}")
-                        continue
+                if commit in ["compare", "blob"]:
+                    logger.debug(f"Unable to parse {var}")
+                    continue
 
-                    if commit not in ["commit", "commits"]:
-                        logger.debug(f"Unable to parse {var}")
-                        continue
+                if commit not in ["commit", "commits"]:
+                    logger.debug(f"Unable to parse {var}")
+                    continue
 
-                    proj_name = f"{group}/{proj}"
-                    if proj_name not in repo_commits:
-                        repo_commits[proj_name] = []
+                proj_name = f"{group}/{proj}"
+                if filter_repo and proj_name!=filter_repo:
+                    continue
+                
+                if filter_time and not check_if_cve_within_date_frame(filter_time,row['cve']):
+                    continue
 
-                    commit_hash = commit_hash.replace(" ", "")
-                    commit_hash = commit_hash.replace(".patch", "")
-                    commit_hash = commit_hash.replace("confirm:", "")
-                    commit_hash = commit_hash[:40]
-                    if commit_hash not in repo_commits[proj_name]:
-                        repo_commits[proj_name].append(commit_hash)
+                if proj_name not in repo_commits:
+                    repo_commits[proj_name] = []
+
+                commit_hash = commit_hash.replace(" ", "")
+                commit_hash = commit_hash.replace(".patch", "")
+                commit_hash = commit_hash.replace("confirm:", "")
+                commit_hash = commit_hash[:40]
+                if commit_hash not in repo_commits[proj_name]:
+                    repo_commits[proj_name].append(commit_hash)
+
 
     return repo_commits
 
@@ -369,13 +410,13 @@ def preprocess_dataframe(cves):
 datasets_foldername = "datasets"
 
 
-def cve_preprocess(output_dir, cache_csv=False):
+def cve_preprocess(output_dir, filter_repo, filter_time, dont_cache):
     logger.debug("Downloading CVE dataset")
     safe_mkdir(os.path.join(output_dir, datasets_foldername))
-    if not cache_csv:
+    if dont_cache:
         cve_xml = "https://cve.mitre.org/data/downloads/allitems.csv"
         urllib.request.urlretrieve(
-            cve_xml, os.path.join(output_dir, datasets_foldername)
+            cve_xml, os.path.join(output_dir, datasets_foldername, "allitems.csv")
         )
 
     cves = pd.read_csv(
@@ -387,7 +428,7 @@ def cve_preprocess(output_dir, cache_csv=False):
     )
     cves = preprocess_dataframe(cves)
 
-    repo_commits = extract_commits_from_projects_gh(cves)
+    repo_commits = extract_commits_from_projects_gh(cves, filter_repo, filter_time)
     with open(os.path.join(output_dir, "repo_commits.json"), "w") as fout:
         json.dump(repo_commits, fout, sort_keys=True, indent=4)
 
@@ -603,9 +644,12 @@ def main(
     aggregate=False,
     all=False,
     output_dir="output",
+    filter_repo="",
+    filter_time="",
+    dont_cache=False
 ):
     if all or cve:
-        cve_preprocess(output_dir)
+        cve_preprocess(output_dir, filter_repo, filter_time, dont_cache=dont_cache)
     if all or graphql:
         graphql_preprocess(output_dir)
     if all or metadata:
@@ -632,9 +676,22 @@ if __name__ == "__main__":
         help="Runs aggregation with graphql and gharpchive data",
     )
     parser.add_argument(
+        "--filter-repo",
+        type=str,
+        default="",
+        help="Filter selected repo to use"
+    )
+    parser.add_argument(
+        "--filter-time",
+        type=str,
+        default="",
+        help="Filter time to gather commits, formated as start_year-end_year when the end year is not included"
+    )
+    parser.add_argument(
         "--all", action="store_true", help="Run all preprocessing steps"
     )
     parser.add_argument("-o", "--output-dir", action="store", default="data")
+    parser.add_argument("--dont-cache",  action="store_true", help="Dont cache")
     args = parser.parse_args()
 
     main(
@@ -645,4 +702,6 @@ if __name__ == "__main__":
         aggregate=args.aggregate,
         all=args.all,
         output_dir=args.output_dir,
+        filter_repo=args.filter_repo,
+        filter_time=args.filter_time
     )
