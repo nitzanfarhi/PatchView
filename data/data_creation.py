@@ -16,8 +16,8 @@ import traceback
 import urllib.request
 
 import pandas as pd
-import data_graphql
-from misc import safe_mkdir
+import data.data_graphql
+from data.misc import safe_mkdir
 
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
