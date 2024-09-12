@@ -1,25 +1,15 @@
-FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel
-RUN apt update && apt install  openssh-server sudo -y
-RUN useradd -rm -d /home/ubuntu -s /bin/bash -g root -G sudo -u 1000 test 
-RUN  echo 'test:test' | chpasswd
-RUN service ssh start
+FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel 
+RUN apt-get update && \
+ apt-get install -y openssh-server
+RUN python -m pip install --upgrade pip
+RUN python -m pip install transformers tensorboard datasets scikit-learn pandas wandb matplotlib git2json shap torch wandb
+# Create an SSH user
+RUN useradd -rm -d /home/sshuser -s /bin/bash -g root -G sudo -u 1000 sshuser
+# Set the SSH user's password (replace "password" with your desired password)
+RUN echo 'sshuser:password' | chpasswd
+# Allow SSH access
+RUN mkdir /var/run/sshd
+# Expose the SSH port
 EXPOSE 22
-
-RUN apt-get -y install git
-COPY requirements.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-
-WORKDIR /app_home
-COPY cache_data/orc/* cache_data/orc/
-# COPY cache_data/events/gh_cve_proccessed/*.parquet cache_data/events/gh_cve_proccessed/
-# COPY cache_data/events/timezones/*  cache_data/events/timezones/
-# COPY cache_data/events/*.json cache_data/events/
-# COPY cache_data/models cache_data/models
-# COPY cache_data/message/* cache_data/message/
-# COPY cache_data/code/* cache_data/code/
-COPY *.py ./
-COPY sweeps/* sweeps/
-RUN echo 'root:root' | chpasswd
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-
+# Start SSH server on container startup
+CMD ["/usr/sbin/sshd", "-D"]

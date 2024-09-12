@@ -3,7 +3,7 @@ import logging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
     datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.WARNING,
+    level=logging.DEBUG,
 )
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,13 @@ import traceback
 import urllib.request
 
 import pandas as pd
-from data import data_graphql
-from data.misc import safe_mkdir
+import data.data_graphql
+from misc import safe_mkdir
 
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime
+from git2json import git2jsons, run_git_log
 
 
 GITHUB_ARCHIVE_DIRNAME = "gharchive"
@@ -332,15 +333,15 @@ def extract_commits_from_projects_gh(cves):
                 if "/commit" in var.lower():
                     group, proj, commit, commit_hash = parse_url(var)
                     if commit is None:
-                        logger.debug(f"Unable to parse {var}")
+                        logger.debug(f"Unable to parse {var} - Commit is None")
                         continue
 
                     if commit in ["compare", "blob"]:
-                        logger.debug(f"Unable to parse {var}")
+                        logger.debug(f"Unable to parse {var} - No compare or blob")
                         continue
 
                     if commit not in ["commit", "commits"]:
-                        logger.debug(f"Unable to parse {var}")
+                        logger.debug(f"Unable to parse {var} - No commit or commits")
                         continue
 
                     proj_name = f"{group}/{proj}"
@@ -375,7 +376,7 @@ def cve_preprocess(output_dir, cache_csv=False):
     if not cache_csv:
         cve_xml = "https://cve.mitre.org/data/downloads/allitems.csv"
         urllib.request.urlretrieve(
-            cve_xml, os.path.join(output_dir, datasets_foldername)
+            cve_xml, os.path.join(output_dir, datasets_foldername, "allitems.csv")
         )
 
     cves = pd.read_csv(
@@ -385,8 +386,10 @@ def cve_preprocess(output_dir, cache_csv=False):
         names=["cve", "entry", "desc", "ref", "assigned", "un1", "un2"],
         dtype=str,
     )
+    logger.info("Preprocessing CSV")
     cves = preprocess_dataframe(cves)
 
+    logger.info("Extracting Commits from Github")
     repo_commits = extract_commits_from_projects_gh(cves)
     with open(os.path.join(output_dir, "repo_commits.json"), "w") as fout:
         json.dump(repo_commits, fout, sort_keys=True, indent=4)
@@ -595,25 +598,22 @@ def metadata_preprocess(output_dir):
         json.dump(repos, mfile)
 
 
-def main(
-    graphql=False,
-    cve=False,
-    metadata=False,
-    commits=False,
-    aggregate=False,
-    all=False,
-    output_dir="output",
-):
-    if all or cve:
-        cve_preprocess(output_dir)
-    if all or graphql:
-        graphql_preprocess(output_dir)
-    if all or metadata:
-        metadata_preprocess(output_dir)
-    if all or commits:
-        extract_commits_from_projects(output_dir)
-    if all or aggregate:
-        aggregate_all(output_dir)
+def main(args):
+    if args.all or args.cve:
+        logger.warning("Running CVE Preprocessing")
+        cve_preprocess(args.output_dir, cache_csv=args.cache_csv)
+    if args.all or args.graphql:
+        logger.warning("Running GraphQL Preprocessing")
+        graphql_preprocess(args.output_dir)
+    if args.all or args.metadata:
+        logger.warning("Running Metadata Preprocessing")
+        metadata_preprocess(args.output_dir)
+    if args.all or args.commits:
+        logger.warning("Extacting Commits")
+        extract_commits_from_projects(args.output_dir)
+    if args.all or args.aggregate:
+        logger.warning("Aggregating Data")
+        aggregate_all(args.output_dir)
 
 
 if __name__ == "__main__":
@@ -634,15 +634,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--all", action="store_true", help="Run all preprocessing steps"
     )
-    parser.add_argument("-o", "--output-dir", action="store", default="data")
+    parser.add_argument("-o", "--output-dir", action="store", default="output")
+    parser.add_argument("--cache_csv", action="store_true")
     args = parser.parse_args()
 
-    main(
-        graphql=args.graphql,
-        cve=args.cve,
-        metadata=args.metadata,
-        commits=args.commits,
-        aggregate=args.aggregate,
-        all=args.all,
-        output_dir=args.output_dir,
-    )
+    main(args)

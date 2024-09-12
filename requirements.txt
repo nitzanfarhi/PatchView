@@ -7,3 +7,4 @@ wandb
 matplotlib
 git2json
 shap
+torch

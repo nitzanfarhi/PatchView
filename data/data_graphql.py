@@ -8,8 +8,15 @@ import collections
 import requests
 import os
 
-from data.misc import safe_mkdir
+from misc import safe_mkdir
 
+import sys
+import collections 
+if sys.version_info.major == 3 and sys.version_info.minor >= 10:
+
+    from collections.abc import MutableMapping
+else:
+    from collections import MutableMapping
 
 class RepoNotFoundError(BaseException):
     pass
@@ -674,33 +681,38 @@ def run_query(query):
     """sends a query to the github graphql api and returns the result as json"""
     counter = 0
     while True:
-        request = requests.post(
-            "https://api.github.com/graphql", json={"query": query}, headers=headers
-        )
-        if request.status_code == 200:
-            return request.json()
-        elif request.status_code == 502:
-            raise RuntimeError(
-                f"Query failed to run by returning code of {request.status_code}. {request}"
-            )
+        try:
+          request = requests.post(
+              "https://api.github.com/graphql", json={"query": query}, headers=headers
+          )
+          if request.status_code == 200:
+              return request.json()
+          elif request.status_code == 502:
+              raise RuntimeError(
+                  f"Query failed to run by returning code of {request.status_code}. {request}"
+              )
 
-        else:
-            request_json = request.json()
-            if "errors" in request_json and (
-                "timeout" in request_json["errors"][0]["message"]
-                or request_json["errors"]["type"] == "RATE_LIMITED"
-            ):
-                print("Waiting for an hour")
-                print(request, request_json)
-                counter += 1
-                if counter < 6:
-                    time.sleep(60 * 60)
-                    continue
-                break
+          else:
+              request_json = request.json()
+              if "errors" in request_json and (
+                  "timeout" in request_json["errors"][0]["message"]
+                  or request_json["errors"]["type"] == "RATE_LIMITED"
+              ):
+                  print("Waiting for an hour")
+                  print(request, request_json)
+                  counter += 1
+                  if counter < 6:
+                      time.sleep(60 * 60)
+                      continue
+                  break
 
-            raise RuntimeError(
-                f"Query failed to run by returning code of {request.status_code}. {query}"
-            )
+              raise RuntimeError(
+                  f"Query failed to run by returning code of {request.status_code}. {query}"
+              )
+        except requests.exceptions.ConnectionError:
+            logging.error("Sleeping for a minute")
+            time.sleep(60)
+            
 
 
 def flatten(d, parent_key="", sep="_"):
@@ -708,7 +720,7 @@ def flatten(d, parent_key="", sep="_"):
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
-        if isinstance(v, collections.MutableMapping):
+        if isinstance(v, MutableMapping):
             items.extend(flatten(v, new_key, sep=sep).items())
         else:
             items.append((new_key, v))
