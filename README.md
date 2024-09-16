@@ -42,3 +42,8 @@ python main.py --epochs 100 --learning_rate 1e-5 --dropout 0.8  --recreate-cache
 ```bash
 python main.py --epochs 10 --eval_batch_size 16 --train_batch_size 16 -lr 1e-5 --dropout 0.7  --recreate_cache --code_merge_file --source_model Multi
 ```
+
+
+### Data Creation
+#### Creating all commits DB (takes a lot of time 😂)
+```python data_creation.py --commits -o ../../dataset/```

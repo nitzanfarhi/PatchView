@@ -15,8 +15,12 @@ from transformers import pipeline
 
 from models import *
 
-with open(r"C:\secrets\github_token.txt", "r") as f:
-    github_token = f.read()
+try:
+    with open(r"C:\secrets\github_token.txt", "r") as f:
+        github_token = f.read()
+except FileNotFoundError:
+    with open(r"/storage/nitzan/code/github_token.txt", "r") as f:
+        github_token = f.read()
 
 
 def get_repository_language(repo_owner, repo_name):
@@ -173,7 +177,7 @@ def save_language_compare(mall, run):
 
 def example_explainability(mall, run, message_model_name):
     from msd import get_tokenizer
-    from datasets import get_commit_from_repo
+    from datasets_info import get_commit_from_repo
 
     args = argparse.Namespace()
     # wandb.init()
