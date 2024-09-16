@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from functools import reduce
 from msd import define_activation, get_tokenizer
-from datasets import get_commit_from_repo
+from datasets_info import get_commit_from_repo
 from transformers import pipeline
 
 from models import *
@@ -244,7 +244,7 @@ events_model = get_events_model(args)
 
 # %%
 import json
-from datasets import EventsDataset
+from datasets_info import EventsDataset
 
 with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
     mall = json.load(f)

@@ -39,8 +39,8 @@ from transformers import (
 )
 
 from models.models import get_model
-from data.datasets import EventsDataset, MyConcatDataset, TextDataset
-from data.datasets import get_patchdb_repos
+from data.datasets_info import EventsDataset, MyConcatDataset, TextDataset
+from data.datasets_info import get_patchdb_repos
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -724,7 +724,7 @@ def main(args):
         args.return_class = True
         dataset = MyConcatDataset(args, events_dataset=dataset)
 
-    elif args.source_model == "Multi":
+    elif args.source_model in ["Multi", "Multi_Without_Behavioural", "Multi_Without_Code","Multi_Without_Message"]:
         dataset, code_tokenizer, message_tokenizer = get_multi_dataset(args, mall)
         args.return_class = True
     else:
@@ -817,27 +817,41 @@ def get_multi_dataset(args, mall):
     """Get the multi dataset."""
     keys = sorted(list(mall.keys()))
 
-    code_tokenizer = get_tokenizer(args, args.code_model_type, args.code_tokenizer_name)
-    code_dataset = TextDataset(
-        code_tokenizer, args, mall, keys, args.code_embedding_type, args.filter_repos
-    )
+    if args.source_model == "Multi_Without_Code":
+        code_tokenizer = None
+        code_dataset = None
+    else:
+        code_tokenizer = get_tokenizer(args, args.code_model_type, args.code_tokenizer_name)
+        code_dataset = TextDataset(
+            code_tokenizer, args, mall, keys, args.code_embedding_type, args.filter_repos
+        )
 
-    logger.warning("Overall added lines: %s" ,code_dataset.added_lines_statistics)
-    logger.warning("Overall deleted lines: %s" ,code_dataset.deleted_lines_statistics)
+        logger.warning("Overall added lines: %s" ,code_dataset.added_lines_statistics)
+        logger.warning("Overall deleted lines: %s" ,code_dataset.deleted_lines_statistics)
 
-    code_tokenizer = code_dataset.tokenizer
+        code_tokenizer = code_dataset.tokenizer
 
-    message_tokenizer = get_tokenizer(
-        args, args.message_model_type, args.message_tokenizer_name
-    )
-    message_dataset = TextDataset(
-        message_tokenizer, args, mall, keys, args.message_embedding_type, args.filter_repos
-    )
-    message_tokenizer = message_dataset.tokenizer
+    if args.source_model == "Multi_Without_Message":
+        message_tokenizer = None
+        message_dataset = None
+    else:
+        message_tokenizer = get_tokenizer(
+            args, args.message_model_type, args.message_tokenizer_name
+        )
+        message_dataset = TextDataset(
+            message_tokenizer, args, mall, keys, args.message_embedding_type, args.filter_repos
+        )
+        message_tokenizer = message_dataset.tokenizer
 
-    events_dataset = EventsDataset(args, mall, keys, args.filter_repos)
-    args.xshape1 = events_dataset[0][0].shape[0]
-    args.xshape2 = events_dataset[0][0].shape[1]
+    if args.source_model == "Multi_Without_Behavioural":
+        events_dataset = None
+        args.xshape1 = 0
+        args.xshape2 = 0
+    else:
+        events_dataset = EventsDataset(args, mall, keys, args.filter_repos)
+        args.xshape1 = events_dataset[0][0].shape[0]
+        args.xshape2 = events_dataset[0][0].shape[1]
+
     concat_dataset = MyConcatDataset(
         args,
         code_dataset=code_dataset,
