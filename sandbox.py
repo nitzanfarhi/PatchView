@@ -5,17 +5,18 @@ run = wandb.init()
 # %%
 
 from matplotlib import pyplot as plt
-from datasets import get_commit_from_repo
+from data.datasets_info import get_commit_from_repo
 
 import argparse
 import shap
 
 from models import *
-from msd import get_tokenizer
+from main import get_tokenizer
 from transformers import pipeline
 
-from results import get_all_predictions
-
+from results.results import get_all_predictions
+from models.models import get_message_model, initialize_model_from_wandb
+# %%
 
 args = argparse.Namespace()
 args.code_artifact = "nitzanfarhi/code4/run-ia1zinlc-test_table_0:v0"
@@ -38,8 +39,8 @@ args.dropout = 0.1
 args.freeze_submodel_layers = True
 args.do_lower_case = False
 message_model = get_message_model(args)
-if args.multi_message_model_artifact:
-    initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
+# if args.multi_message_model_artifact:
+#     initialize_model_from_wandb(args, message_model, args.multi_message_model_artifact)
 
 tokenizer = get_tokenizer(args, args.message_model_type, args.message_tokenizer_name)
 model = pipeline(
@@ -51,14 +52,34 @@ commit_messages = []
 for i in range(len(mall)):
     repo_name = mall.iloc[i]["Name"]
     repo_hash = mall.iloc[i]["Hash"]
-    commit = get_commit_from_repo(
-        os.path.join(r"D:\multisource\commits", repo_name), repo_hash
-    )
-    if len(commit.msg) < tokenizer.model_max_length:
-        commit_messages.append(commit.msg)
+    try:
+        commit = get_commit_from_repo(
+            os.path.join(r"/storage/nitzan/dataset/commits", repo_name), repo_hash
+        )
+        if len(commit.msg) < tokenizer.model_max_length:
+            commit_messages.append(commit.msg)
+    except Exception:
+        continue
 
 # Todo understand which label is which
 shap_values = explainer(commit_messages)
+
+# %%
+
+# from collections import Counter
+
+# mall = [tokenizer.tokenize(commit_message) for commit_message in commit_messages] 
+# mall = [
+#     x
+#     for xs in mall
+#     for x in xs
+# ]
+# Counter(mall).most_common()
+
+for a,b in enumerate(commit_messages):
+    if "overflow" in b.lower():
+        print(a,b)
+
 # %%
 
 fig = shap.plots.bar(

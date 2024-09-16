@@ -394,8 +394,9 @@ def extract_commits_from_projects_gh(cves, filter_repo, filter_time):
                 if commit_hash not in repo_commits[proj_name]:
                     repo_commits[proj_name].append(commit_hash)
                 print(f"{proj_name} - -{len(repo_commits[proj_name])}")
-                
-    
+
+
+
     return repo_commits
 
 
@@ -570,6 +571,10 @@ def extract_commits_from_projects(output_dir):
         author, repo = repo_name.split("/")
         repo_directory = f"{author}_{repo}"
         commit_cur_dir = os.path.join(output_dir, commit_directory, repo_directory)
+
+        # This is the last action
+        if os.path.join(output_dir, timezone_directory, f"{author}_{repo}.json"):
+            continue
         repo_url = f"https://github.com/{repo_name}.git"
 
         subprocess.run(f"git clone --mirror {repo_url} {commit_cur_dir}", shell=True)

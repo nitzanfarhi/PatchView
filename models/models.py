@@ -153,17 +153,40 @@ class RobertaClass(torch.nn.Module):
 
 
 class MultiModel(nn.Module):
+
+    def get_first_hidden_layer_size(self):
+
+        behavioral_size = self.events_model.cut_layer_last_dim
+        code_size = 768
+        message_size = 768
+        if self.source_model == "Multi":
+            return behavioral_size + code_size + message_size
+
+        elif self.source_model == "Multi_Without_Behavioural":
+            return code_size + message_size
+
+        elif self.source_model == "Multi_Without_Code":
+            return behavioral_size + message_size
+
+        elif self.source_model == "Multi_Without_Message":
+            return behavioral_size + code_size
+        
+        else:
+            raise NotImplemented(f"Unknown source model {self.source_model}")
+
+
+
     def __init__(self, code_model, message_model, events_model, args):
         super(MultiModel, self).__init__()
         self.code_model = code_model
         self.message_model = message_model
         self.events_model = events_model
         self.args = args
+        self.source_model = args.source_model
         self.dropout = nn.Dropout(args.dropout)
         if args.cut_layers:
-            # todo fix
             self.classifier1 = nn.Linear(
-                self.events_model.cut_layer_last_dim + 2 * 768,
+                self.get_first_hidden_layer_size(),
                 self.args.multi_model_hidden_size_1,
             )
             self.classifier2 = nn.Linear(
@@ -174,14 +197,49 @@ class MultiModel(nn.Module):
             # 6 = 2 + 2 + 2
             self.classifier1 = nn.Linear(6, 2)
         self.activation = nn.Tanh()
+    
+    def get_output_by_model_type(self, data):
+        code, message, events = None, None, None
+        x_shape = 0 
+        if self.source_model == "Multi":
+            code, message, events = data
+        elif self.source_model == "Multi_Without_Behavioural":
+            code, message = data
+
+        elif self.source_model == "Multi_Without_Code":
+            message, events = data
+
+        elif self.source_model == "Multi_Without_Message":
+            code, events = data
+        
+        else:
+            raise NotImplemented(f"Unknown source model {self.source_model}")
+
+        model_outputs = []
+        if code is not None:
+            code = self.code_model(code)
+            model_outputs.append(code)
+            x_shape = code.shape[0]
+
+        if message is not None:
+            message = self.message_model(message)
+            model_outputs.append(message)
+            x_shape = message.shape[0]
+
+        if events is not None:
+            events = self.events_model(events)
+            model_outputs.append(events)
+        
+        x = torch.cat(model_outputs, dim=1)
+
+        assert x_shape!=0, "X_shape must not be 0"
+        return x.reshape(x_shape, -1)
+
+
+
 
     def forward(self, data, labels=None):
-        code, message, events = data
-        code = self.code_model(code)
-        message = self.message_model(message)
-        events = self.events_model(events)
-        x = torch.cat([code, message, events], dim=1)
-        x = x.reshape(code.shape[0], -1)
+        x = self.get_output_by_model_type(data)
         if self.args.cut_layers:
             x = self.classifier1(x)
             x = self.activation(x)
@@ -272,28 +330,44 @@ def get_events_model(args):
 
 
 def get_multi_model(args, message_tokenizer=None, code_tokenizer=None):
-    code_model = get_code_model(args)
-    code_model.encoder.resize_token_embeddings(len(code_tokenizer))
-    args.hidden_size = code_model.encoder.config.hidden_size
-    if args.multi_code_model_artifact:
-        initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
+    # Code Model Handling
+    if args.source_model == "Multi_Without_Code":
+        code_model = None
+    else:
+        code_model = get_code_model(args)
+        code_model.encoder.resize_token_embeddings(len(code_tokenizer))
+        args.hidden_size = code_model.encoder.config.hidden_size
+        if args.multi_code_model_artifact:
+            initialize_model_from_wandb(args, code_model, args.multi_code_model_artifact)
 
-    events_model = get_events_model(args)
+    # Behavioral Model Handling
+    if args.source_model == "Multi_Without_Behavioural":
+        events_model = None
+    else:
+        events_model = get_events_model(args)
+
     if args.multi_events_model_artifact:
         initialize_model_from_wandb(
             args, events_model, args.multi_events_model_artifact
         )
 
-    message_model = get_message_model(args)
-    if args.multi_message_model_artifact:
-        initialize_model_from_wandb(
-            args, message_model, args.multi_message_model_artifact
-        )
+    # Message Model Handling
+    if args.source_model == "Multi_Without_Message":
+        message_model = None
+    else:
+        message_model = get_message_model(args)
+        if args.multi_message_model_artifact:
+            initialize_model_from_wandb(
+                args, message_model, args.multi_message_model_artifact
+            )
 
     if args.cut_layers:
-        code_model.cut_layers()
-        events_model.cut_layers()
-        message_model.cut_layers()
+        if code_model:
+            code_model.cut_layers()
+        if events_model:
+            events_model.cut_layers()
+        if message_model:
+            message_model.cut_layers()
 
     if args.multi_model_type == "multiv1":
         model = MultiModel(code_model, message_model, events_model, args)
@@ -332,10 +406,12 @@ def get_model(args, message_tokenizer=None, code_tokenizer=None):
         if args.cut_layers:
             model.cut_layers()
 
-    elif args.source_model == "Multi":
+    elif args.source_model in ["Multi","Multi_Without_Behavioural", "Multi_Without_Code","Multi_Without_Message"]:
         model = get_multi_model(
             args, message_tokenizer=message_tokenizer, code_tokenizer=code_tokenizer
         )
+    else:
+        raise NotImplementedError("Unknown source model type")
 
     return model
 
