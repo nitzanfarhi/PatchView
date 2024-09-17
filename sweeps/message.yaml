@@ -2,7 +2,6 @@ command:
   - ${env}
   - ${interpreter}
   - ${program}
-  - "--recreate_cache"
   - ${args}
 
 program: main.py
@@ -50,6 +49,3 @@ parameters:
 
   cache_dir:
     values: ["/storage/nitzan/cache_data/"]
-
-  filter_repos:
-    values: ["tensorflow_tensorflow"]  
