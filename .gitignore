@@ -20,3 +20,4 @@ output/*
 .vscode/ltex.hiddenFalsePositives.en-US.txt
 .ipynb_checkpoints/*
 linux/*
+results/wandb/*

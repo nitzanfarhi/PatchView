@@ -8,10 +8,10 @@
       "name": "Create Data",
       "type": "debugpy",
       "request": "launch",
-      "program": "data/data_creation.py",
+      "program": "data_creation.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
-      "args": ["--cve","--commits","--output-dir","linux","--filter-repo","torvalds/linux","--filter-time","2023-2024"]
+      "args": ["--commits","--o","../../dataset"]
     },
     {
       "name": "Debug not my code",
