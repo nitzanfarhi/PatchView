@@ -10,16 +10,12 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-WORKDIR /app_home
-COPY cache_data/orc/* cache_data/orc/
-# COPY cache_data/events/gh_cve_proccessed/*.parquet cache_data/events/gh_cve_proccessed/
-# COPY cache_data/events/timezones/*  cache_data/events/timezones/
-# COPY cache_data/events/*.json cache_data/events/
-# COPY cache_data/models cache_data/models
-# COPY cache_data/message/* cache_data/message/
-# COPY cache_data/code/* cache_data/code/
-COPY *.py ./
-COPY sweeps/* sweeps/
+RUN curl -fsSL https://code-server.dev/install.sh | sh
+
+RUN code-server --install-extension ms-python.python
+
+
+WORKDIR /storage/nitzan/code/PatchView
 RUN echo 'root:root' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 
