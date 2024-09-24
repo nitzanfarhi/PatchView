@@ -11,7 +11,10 @@
       "program": "data_creation.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
-      "args": ["--commits","--o","../../dataset"]
+      "args": [
+        "--o","../../dataset",
+        "--graphql"
+    ]
     },
     {
       "name": "Debug not my code",
@@ -136,14 +139,16 @@
         "roberta-base",
         "--message_tokenizer_name",
         "roberta-base",
+        // "--use_cached_orchestrator",
         // "--cache_dir",
         // "cache_data",
         "--run_fold",
         "7",
         "--recreate_cache",
-        "--cache_dir=/storage/nitzan/cache_data",
+        "--cache_dir=/storage/nitzan/cache_data1",
         "--multi_message_model_artifact=nitzanfarhi/MSD4/Message_model_7.bin:v7",
         // "--filter_repos=tensorflow_tensorflow",
+        "--dataset=/storage/nitzan/dataset"
       ]
     },
     {

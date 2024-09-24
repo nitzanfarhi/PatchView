@@ -37,6 +37,9 @@ LOG_GRAPHQL = "graphql_errlist.txt"
 LOG_AGGR_ALL = "gharchive_errlist.txt"
 key_list = set()
 err_counter = 0
+START_YEAR = 2015
+END_YEAR = 2024
+
 ref_keys = [
     "ASCEND",
     "ENGARDE",
@@ -471,12 +474,11 @@ def aggregate_all(output_dir):
 
     # Getting graphql data
 
-    print("[LOG] Getting graphql data:")
+    logger.warning("Getting graphql data:")
     for filename in os.listdir(os.path.join(output_dir, data_graphql.OUTPUT_DIRNAME))[
         :
     ]:
         logger.debug(f"Getting graphql of {filename}")
-        print(filename)
         df = pd.read_csv(
             os.path.join(output_dir, data_graphql.OUTPUT_DIRNAME, f"{filename}")
         )
@@ -493,16 +495,16 @@ def aggregate_all(output_dir):
                 new_dfs.append(cur_df)
 
     # Getting gharchive data
-    logger.debug("Getting gharchive data:")
+    logger.warning("Getting gharchive data:")
     dfs = []
-    for year in range(2015, 2020):
+    for year in range(START_YEAR, END_YEAR):
         logger.debug(f"gharchive of year {year}")
         dfs.append(
             pd.read_csv(os.path.join(output_dir, GITHUB_ARCHIVE_DIRNAME, f"{year}.csv"))
         )
     # adding vulnerabilities events
 
-    logger.debug("Adding vulnerabilities events:")
+    logger.warning("Adding vulnerabilities events:")
     # Getting commit data
 
     repo_commit_df_lst = []
@@ -541,22 +543,23 @@ def aggregate_all(output_dir):
             repo_commit_df
         )  # df['Time'] = pd.to_datetime(df['Time'])
 
-    logger.debug("Concatenating dataframes")
+    logger.warning("Concatenating dataframes")
     df = pd.concat(dfs + repo_commit_df_lst + new_dfs)
 
-    logger.debug("Replacing / with _")
+    logger.warning("Replacing / with _")
     df.name = df.name.str.replace("/", "_")
 
-    logger.debug("Grouping Dataframes")
+    logger.warning("Grouping Dataframes")
     repo_list = list(df.groupby("name"))
 
-    logger.debug("saving data to parquets")
+    logger.warning("saving data to parquets")
     safe_mkdir(os.path.join(output_dir, gh_cve_dir))
     for repo_name, df in repo_list:
         logger.debug(f"Saving {repo_name} to parquet")
         df.to_csv(
             os.path.join(output_dir, gh_cve_dir, f"{repo_name.replace('/', '_')}.csv")
         )
+    logger.warning("Done")
 
 
 def extract_commits_from_projects(output_dir):
@@ -628,7 +631,7 @@ def metadata_preprocess(output_dir):
         repo_commits = json.load(fin)
 
     for repo_name in repo_commits.keys():
-        logger.debug(f"Processing {repo_name}")
+        logger.warning(f"Processing {repo_name}")
         author, repo = repo_name.split("/")
         repo_metadata = data_graphql.get_commit_metadata(author, repo)
         if not repo_metadata:

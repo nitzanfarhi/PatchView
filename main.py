@@ -38,6 +38,7 @@ from transformers import (
     DistilBertTokenizer,
 )
 
+from data.orchestator import get_orchestrator
 from models.models import get_model
 from data.datasets_info import EventsDataset, MyConcatDataset, TextDataset
 from data.datasets_info import get_patchdb_repos
@@ -69,6 +70,24 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Data Related arguments
+
+    parser.add_argument("--use_cached_orchestrator",
+                        action="store_true",
+                        help="predefined orchestration of train/val/test"
+    )
+    
+    parser.add_argument("--split_by_repos",
+                        action="store_true",
+                        help="orchestration of train/val/test is splitted by different repositories"
+    )
+
+    parser.add_argument(
+        "--dataset",
+        default="/storage/nitzan/dataset/",
+        type=str,
+        help="The output directory where the model predictions and checkpoints will be written.",
+    )
+
     parser.add_argument(
         "--output_dir",
         default="./output",
@@ -691,8 +710,15 @@ def main(args):
     args.message_activation = define_activation(args.message_activation)
     args.event_activation = define_activation(args.event_activation)
 
-    with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
-        mall = json.load(f)
+    if args.use_cached_orchestrator:
+        with open(os.path.join(args.cache_dir, "orc", "orchestrator.json"), "r") as f:
+            mall = json.load(f)
+    else:
+        mall = get_orchestrator(
+            os.path.join(args.dataset, "commits"),
+            os.path.join(args.dataset, "repo_commits.json"),
+            cache_path=args.cache_dir,
+            split_by_repos=args.split_by_repos)
 
     code_tokenizer, message_tokenizer = None, None
 
