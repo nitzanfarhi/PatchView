@@ -20,9 +20,12 @@ from transformers import pipeline
 from models import *
 
 # %%
-with open(r"C:\secrets\github_token.txt", "r") as f:
-    github_token = f.read()
-
+try:
+    with open(r"C:\secrets\github_token.txt", "r") as f:
+        github_token = f.read()
+except FileNotFoundError:
+    with open(r"/storage/nitzan/code/github_token.txt", "r") as f:
+        github_token = f.read()
 
 os.environ["WANDB_NOTEBOOK_NAME"] = "results.ipynb"
 run = wandb.init(settings=wandb.Settings(start_method="thread"))

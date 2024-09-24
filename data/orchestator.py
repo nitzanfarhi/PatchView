@@ -5,12 +5,12 @@ import subprocess
 import git
 import traceback
 from tqdm import tqdm
+import pathlib
 from pydriller import Repository
 
 SEED = 0x1337
 
 repo_commits_location = r"cache_data\repo_commits.json"
-COMMIT_REPO_PATH = r"D:\multisource\commits"
 MAXIMAL_FILE_SIZE = 100000
 
 
@@ -19,10 +19,10 @@ VALIDATION_RATE = 0
 TEST_RATE = 0
 
 
-def get_benign_commits(repo, security_commits):
-    cur_repo = COMMIT_REPO_PATH + "\\" + repo.replace("/", "_")
+def get_benign_commits(cur_repo_path,repo, security_commits):
+    cur_repo = cur_repo_path + "/" + repo.replace("/", "_")
     mall = subprocess.run(
-        "git rev-list --all --since=2015", stdout=subprocess.PIPE, cwd=cur_repo
+        ["git", "rev-list", "--all", "--since=2015"], stdout=subprocess.PIPE, cwd=cur_repo
     )
     mall = mall.stdout.decode("utf-8").split("\n")
     random.shuffle(mall)
@@ -77,10 +77,10 @@ def get_commit_from_repo(cur_repo, hash):
     return res
 
 
-def prepare_dict(repo, commit, label):
+def prepare_dict(cur_repo_path,repo, commit, label):
     try:
         commit = get_commit_from_repo(
-            os.path.join(COMMIT_REPO_PATH, repo.replace("/", "_")), commit
+            os.path.join(cur_repo_path, repo.replace("/", "_")), commit
         )
         final_dict = {}
         final_dict["name"] = commit.project_name
@@ -102,15 +102,9 @@ def prepare_dict(repo, commit, label):
     return final_dict
 
 
-def main():
+def get_orchestrator_from_details(train_details, val_details, test_details, cache_path=None, cur_repo_path="/storage/nitzan/dataset/commits"):
     random.seed(SEED)
 
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json", "r") as mfile:
-        train_details = json.load(mfile)
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json", "r") as mfile:
-        val_details = json.load(mfile)
-    with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json", "r") as mfile:
-        test_details = json.load(mfile)
     mall = {}
     for row in train_details:
         mall[row[3]] = {"label": row[2], "repo": row[0]}
@@ -126,7 +120,7 @@ def main():
         counter += 1
         new_mall[a] = b
         if b["repo"] not in repo_set:
-            commit = get_benign_commits(b["repo"], mall.keys())
+            commit = get_benign_commits(cur_repo_path, b["repo"], mall.keys())
             repo_set[b["repo"]] = commit
         for _ in range(2):
             try:
@@ -138,8 +132,11 @@ def main():
             except StopIteration:
                 continue
 
-    with open(os.path.join("cache_data", "orc", "orchestrator.json"), "w") as f:
-        json.dump(new_mall, f, indent=4)
+    if cache_path is not None:
+        with open(cache_path, "w") as f:
+            json.dump(new_mall, f, indent=4)
+
+    return new_mall
 
 
 class CommitNotFound(Exception):
@@ -148,45 +145,48 @@ class CommitNotFound(Exception):
     pass
 
 
-def split_randomly(data):
+def split_randomly(cur_repo_path, data):
     commit_dict = {}
     data_keys = list(data)[:]
+    err_list = []
 
     all_commits = []
-    for repo in tqdm(data_keys):
-        print(repo)
+    for repo in (pbar:=tqdm(data_keys)):
+        pbar.set_description(f"Processing {repo}")
+
         positive_repo_counter = 0
         negative_repo_counter = 0
         for commit in data[repo]:
             if commit == "":
                 continue
             try:
-                commit_dict[commit] = prepare_dict(repo, commit, 1)
+                commit_dict[commit] = prepare_dict(cur_repo_path, repo, commit, 1)
                 positive_repo_counter += 1
             except CommitNotFound:
-                print(commit)
+                err_list.append((repo, commit, "CommitNotFound"))
                 continue
 
-        commit = get_benign_commits(repo, data[repo])
+        commit = get_benign_commits(cur_repo_path, repo, data[repo])
         while negative_repo_counter < positive_repo_counter:
             try:
                 current_commit = next(commit)
             except StopIteration:
                 break
 
-            commit_hash = current_commit.hexsha
+            commit_hash = current_commit
             try:
-                commit_dict[commit_hash] = prepare_dict(repo, commit_hash, 0)
+                commit_dict[commit_hash] = prepare_dict(cur_repo_path, repo, commit_hash, 0)
                 negative_repo_counter += 1
             except CommitNotFound:
                 continue
 
     random.shuffle(all_commits)
+    print(err_list)
 
     return commit_dict
 
 
-def split_by_repos(data):
+def split_by_repos(cur_repo_path, data):
     data_keys = list(data)[:]
     # random.shuffle(data_keys)
 
@@ -221,7 +221,7 @@ def split_by_repos(data):
                         continue
                     dict[repo].append((commit, 1))
 
-                for commit in get_benign_commits(repo, data[repo]):
+                for commit in get_benign_commits(cur_repo_path, repo, data[repo]):
                     dict[repo].append((commit, 0))
             except git.exc.NoSuchPathError as e:
                 print(e)
@@ -230,5 +230,26 @@ def split_by_repos(data):
     return training_dict, validation_dict, testing_dict
 
 
+
+def get_orchestrator(commits_path, commits_db_path, cache_path=None,split_by_repos=False):
+    random.seed(SEED)
+
+    with open(commits_db_path, "r") as fin:
+        repo_commits = json.load(fin)
+
+
+    if split_by_repos:
+        return split_by_repos(commits_path, repo_commits)
+    else:
+        return split_randomly(commits_path, repo_commits)
+
+
+
 if __name__ == "__main__":
-    main()
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_train.json", "r") as mfile:
+        train_details = json.load(mfile)
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_val.json", "r") as mfile:
+        val_details = json.load(mfile)
+    with open(r"C:\Users\nitzan\local\analyzeCVE\last_test.json", "r") as mfile:
+        test_details = json.load(mfile)
+    get_orchestrator_from_details(train_details, val_details, test_details, cache_path=os.path.join("cache_data", "orc", "orchestrator.json"))
