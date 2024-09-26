@@ -5,5 +5,5 @@ scikit-learn
 pandas
 wandb
 matplotlib
-git2json
 shap
+./git2json
