@@ -231,14 +231,14 @@ def split_by_repos(cur_repo_path, data):
 
 
 
-def get_orchestrator(commits_path, commits_db_path, cache_path=None,split_by_repos=False):
+def get_orchestrator(commits_path, commits_db_path, cache_path=None,should_split_by_repos=False):
     random.seed(SEED)
 
     with open(commits_db_path, "r") as fin:
         repo_commits = json.load(fin)
 
 
-    if split_by_repos:
+    if should_split_by_repos:
         return split_by_repos(commits_path, repo_commits)
     else:
         return split_randomly(commits_path, repo_commits)
